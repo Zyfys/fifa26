@@ -1,0 +1,42 @@
+# === Python ===
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.Python
+
+# === Virtualenv ===
+.venv/
+venv/
+env/
+
+# === Env / секреты ===
+.env
+.env.*
+!.env.example
+
+# === Тесты / кэш ===
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# === IDE ===
+.idea/
+.vscode/
+*.swp
+
+# === OS ===
+.DS_Store
+Thumbs.db
+
+# === Артефакты проекта ===
+*.pdf
+!docs/**/*.pdf
+*.log
+
+# Локальная dev-БД (SQLite)
+*.db

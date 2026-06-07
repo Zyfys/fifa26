@@ -1,0 +1,42 @@
+# Секреты и локальные данные — НИКОГДА не должны попасть в образ
+.env
+.env.*
+!.env.example
+*.db
+
+# VCS и метаданные
+.git
+.gitignore
+
+# Python-кэши и сборка
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Тесты и инструменты
+tests/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Документация и артефакты
+*.md
+*.pdf
+*.log
+
+# Виртуальные окружения
+.venv/
+venv/
+env/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db

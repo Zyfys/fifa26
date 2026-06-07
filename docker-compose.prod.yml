@@ -1,0 +1,27 @@
+# Прод-конфиг для VPS: запускается ТОЛЬКО бот, он подключается к уже
+# существующему на сервере PostgreSQL (свой контейнер БД не поднимаем).
+#
+# network_mode: host — контейнер бота использует сеть хоста, поэтому видит
+# локальный Postgres по 127.0.0.1:5432. Входящие порты боту не нужны (long-polling).
+#
+# Запуск:
+#   docker compose -f docker-compose.prod.yml build
+#   docker compose -f docker-compose.prod.yml run --rm bot alembic upgrade head
+#   docker compose -f docker-compose.prod.yml run --rm bot python -m src.seed
+#   docker compose -f docker-compose.prod.yml up -d
+
+# Имя проекта compose — отдельное пространство имён, чтобы не конфликтовать
+# с контейнерами/сетями основного проекта на этом же VPS.
+name: fifa26
+
+services:
+  bot:
+    build: .
+    container_name: fifa26-bot
+    network_mode: host
+    env_file:
+      - .env
+    restart: unless-stopped
+    # Лимиты ресурсов: бот не должен голодать соседний проект при флуде/утечке.
+    mem_limit: 512m
+    cpus: 0.5
