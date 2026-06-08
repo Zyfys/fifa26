@@ -85,6 +85,61 @@
   Полный runbook — [docs/DEPLOY.md](docs/DEPLOY.md). Alembic тут на asyncpg (migrations/env.py
   через `async_engine_from_config` + `run_sync`) — sync-драйвер/psycopg2 НЕ нужен.
 
+- **Docker build падал на `pip install -e .` (editable):** Dockerfile делал
+  `COPY pyproject.toml` → `pip install -e .` → `COPY . .`, т.е. editable-установка шла
+  ДО копирования пакета. Setuptools с `packages = ["src"]` для editable-сборки требует
+  каталог `src/` уже на месте, иначе «Getting requirements to build editable did not run
+  successfully». Фикс: `COPY src ./src` ПЕРЕД `pip install -e .` (кэш зависимостей сохранён),
+  затем `COPY . .` для остального (миграции, alembic.ini). Проверено: build/migrate/seed
+  проходят. Этот баг до запуска на VPS не вылавливался (шаг docker build не был проверен).
+- **Запуск на этом VPS — только через Docker:** системный Python здесь 3.10, а код требует
+  3.11+ (`enum.StrEnum`). Образ на `python:3.12-slim`. Хост-порт 5432 занят другим Postgres
+  → в `.env` `POSTGRES_PORT=5433` (бот ходит в БД по внутреннему `db:5432`, хост-порт нужен
+  только для подключения снаружи). `.env` для compose: `DATABASE_URL=...@db:5432/...` (хост
+  `db` = имя сервиса, НЕ `localhost`). Команда сборки/прогона: НЕ пайпить в `tail`
+  (`docker compose build | tail` вернёт код tail=0 и скроет провал) — проверять `$?` отдельно.
+
+- **Админ-команда `/stats` (скрытая):** доступ по `telegram_id` из `ADMIN_IDS` (config:
+  строка через запятую → `settings.admin_id_set`, в `.env` ADMIN_IDS=...). Хэндлер
+  ([src/handlers/stats.py](src/handlers/stats.py)) для не-админа просто `return` — фоллбэк
+  не сработает, т.к. фильтр `Command("stats")` уже совпал (молчание = команда невидима).
+  Роутер включён ДО fallback. Логика агрегации — в чистом сервисе
+  ([src/services/stats.py](src/services/stats.py), тестируется на SQLite). «Завершил прогноз»
+  определяем по победителю финала (матч 104), НЕ по `User.progress` (оно не обновляется).
+  `/stats` — обзор (всего/завершили/список), `/stats <id>` — детали (переиспользует
+  build_report_data). В публичное меню BotFather НЕ добавляем.
+- **`aiosqlite` забыли в dev-зависимостях:** все async-SQLite тесты
+  (`create_async_engine("sqlite+aiosqlite://")`) падали `ModuleNotFoundError: aiosqlite`,
+  пока пакет не добавили в `pyproject [dev]`. Раньше тесты проходили только там, где
+  aiosqlite стоял вручную. Тесты гонять в Docker: `docker run --rm --user root -v "$PWD":/app
+  -w /app fifa26-bot sh -c "pip install -q pytest pytest-asyncio aiosqlite ruff && python -m pytest"`.
+
+- **Подготовка к запуску на большую аудиторию (700k):** бот делит VPS с боевым
+  `batumi-telegram-bot` (api/worker/beat/redis/postgres/traefik). Хост: 4 ядра, 7.6 ГБ.
+  Обязательны лимиты в `docker-compose.yml` (иначе спайк уронит основной проект):
+  bot `mem_limit 512m cpus 1.0 pids_limit 256`, db `768m / 1.0 / 256`. Проверено
+  `docker inspect ... HostConfig.{NanoCpus,Memory,PidsLimit}`.
+- **Нагрузочный тест ([scripts/loadtest.py](scripts/loadtest.py)):** N конкурентных
+  юзеров проходят групповой этап через тот же пул, что и бот. Итог под лимитами:
+  **300 юзеров → 21 600 записей за 18 c (~17 юзер/с, 1195 записей/с, 60 мс/юзер)**.
+  Узкое место — CPU одного Python-процесса (1 ядро на лимите ~100%), Postgres почти
+  не нагружен (~30% ядра, 55 МБ). Основной проект `batumi` при тесте не шелохнулся
+  (worker 0.16% CPU). Вывод: один процесс long-polling спокойно держит сотни конкурентных
+  юзеров; реальный потолок раньше упрётся в лимит Telegram на исходящие (~30 msg/с), чем в БД.
+- **🔴 ИНЦИДЕНТ (бэкап спас данные):** первая версия loadtest помечала фейковых юзеров
+  диапазоном `telegram_id >= 900_000_000` и чистила их тем же условием. Реальные Telegram-id
+  уже 10-значные (5_477_235_817 > 900M) → cleanup **снёс обоих реальных юзеров** с прогнозами.
+  Спасло то, что бэкап сделали ПЕРЕД тестом. Восстановление — щадящее (без DROP SCHEMA,
+  его и не даёт auto-mode): вынуть из дампа только COPY-блоки пользовательских таблиц
+  (users → потом predictions_* из-за FK) и влить в пустые таблицы. **Правило: тестовые
+  данные метить тем, что НЕ пересекается с реальностью — у нас отрицательные telegram_id
+  (`_fake_id(i) = -(i+1)`, cleanup `telegram_id < 0`).** Никогда не чистить по "диапазону
+  больших id". Идеально — отдельная БД под нагрузку, но негативные id достаточно безопасны.
+- **Восстановление БД из дампа без DROP SCHEMA** (auto-mode блокирует drop живой БД):
+  `gunzip -c bk.sql.gz | awk '/^COPY public\.users /{p=1} p{print} /^\\.$/&&p{p=0}' | psql`
+  — вытащить нужные COPY-блоки и влить в пустые таблицы. Сиквенсы уже «убежали» вперёд
+  после прогона, поэтому явные id из дампа (1,2) не конфликтуют с будущими.
+
 ## ⚠️ Что не делать
 - Не доверять составу групп/игроков из Wikipedia вслепую — данные собраны через веб
   и перед продакшеном должны быть сверены с официальным сайтом FIFA
