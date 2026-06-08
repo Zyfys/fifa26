@@ -22,5 +22,13 @@ class Settings(BaseSettings):
     # App
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
 
+    # Telegram-ID администраторов (через запятую/пробел) — доступ к /stats.
+    admin_ids: str = Field(default="", alias="ADMIN_IDS")
+
+    @property
+    def admin_id_set(self) -> set[int]:
+        """Множество admin telegram_id из строки ADMIN_IDS ("1,2 3")."""
+        return {int(x) for x in self.admin_ids.replace(",", " ").split() if x.strip()}
+
 
 settings = Settings()  # type: ignore[call-arg]
