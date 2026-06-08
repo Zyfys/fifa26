@@ -40,3 +40,6 @@ Thumbs.db
 
 # Локальная dev-БД (SQLite)
 *.db
+
+# Дампы БД (не в git)
+backups/
