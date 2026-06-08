@@ -16,6 +16,7 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
+    "aiosqlite>=0.20",  # async-драйвер SQLite для тестов (create_async_engine)
     "ruff>=0.6",
 ]
 

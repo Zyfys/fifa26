@@ -10,11 +10,12 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
-# Сначала зависимости — лучше кэшируется
+# Сначала манифест + пакет src — editable-установка требует наличия пакета на этом шаге.
 COPY pyproject.toml ./
+COPY src ./src
 RUN pip install --no-cache-dir -e .
 
-# Затем код
+# Затем остальной код (миграции, alembic.ini и пр.)
 COPY . .
 
 # Непривилегированный пользователь: на общем VPS контейнер не должен ходить от root.
