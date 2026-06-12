@@ -12,6 +12,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import CallbackQuery, ErrorEvent, Message
 
 from src.config import settings
+from src.db.session import engine
 from src.handlers import build_root_router
 from src.middlewares import DbSessionMiddleware, ThrottlingMiddleware
 
@@ -51,7 +52,11 @@ async def main() -> None:
     )
     dp = build_dispatcher()
     logging.info("Бот запущен, начинаю polling.")
-    await dp.start_polling(bot)
+    try:
+        await dp.start_polling(bot)
+    finally:
+        # Аккуратно закрываем пул соединений БД при остановке (SIGINT/SIGTERM).
+        await engine.dispose()
 
 
 if __name__ == "__main__":

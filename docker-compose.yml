@@ -1,12 +1,15 @@
 services:
   db:
-    image: postgres:16
+    image: postgres:16.6
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-fifa26}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      # Без дефолта: compose упадёт, если пароль не задан в .env —
+      # дефолтный пароль на VPS = открытая база.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в .env}
       POSTGRES_DB: ${POSTGRES_DB:-fifa26}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      # Только loopback: наружу порт БД не публикуем (бот ходит по compose-сети).
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -14,6 +17,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
     # Лимиты: на общем VPS бот+БД не должны голодать основной проект при наплыве.
     mem_limit: 768m
     cpus: 1.0

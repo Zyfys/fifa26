@@ -39,15 +39,32 @@ class ThrottlingMiddleware(BaseMiddleware):
     для анти-флуда это приемлемо.
     """
 
+    # Порог, после которого чистим устаревшие записи (защита от роста словаря).
+    _CLEANUP_THRESHOLD = 10_000
+
     def __init__(self, interval: float = THROTTLE_INTERVAL) -> None:
         self.interval = interval
         self._last_seen: dict[int, float] = {}
 
     def is_throttled(self, user_id: int, now: float) -> bool:
-        """Зафиксировать апдейт и решить, дропать ли его (слишком частый)."""
+        """Зафиксировать апдейт и решить, дропать ли его (слишком частый).
+
+        Дропнутые апдейты НЕ продлевают блокировку: при непрерывном флуде
+        пользователю проходит один апдейт в interval, а не ноль.
+        """
         last = self._last_seen.get(user_id)
+        if last is not None and now - last < self.interval:
+            return True
         self._last_seen[user_id] = now
-        return last is not None and now - last < self.interval
+        if len(self._last_seen) > self._CLEANUP_THRESHOLD:
+            self._cleanup(now)
+        return False
+
+    def _cleanup(self, now: float) -> None:
+        """Убрать записи старше interval — они уже не влияют на решение."""
+        self._last_seen = {
+            uid: ts for uid, ts in self._last_seen.items() if now - ts < self.interval
+        }
 
     async def __call__(
         self,

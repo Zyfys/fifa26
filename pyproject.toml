@@ -17,7 +17,8 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
     "aiosqlite>=0.20",  # async-драйвер SQLite для тестов (create_async_engine)
-    "ruff>=0.6",
+    # Минорная версия зафиксирована: формат кода зависит от версии ruff.
+    "ruff>=0.15,<0.16",
 ]
 
 [tool.ruff]
@@ -37,5 +38,5 @@ testpaths = ["tests"]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools]
-packages = ["src"]
+[tool.setuptools.packages.find]
+include = ["src*"]
