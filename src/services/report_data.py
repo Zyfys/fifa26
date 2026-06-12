@@ -12,7 +12,12 @@ from src.db import repo
 from src.services.awards import AWARD_DISPLAY, FORMATION, POSITION_LABEL
 from src.services.bracket import STAGE_NAMES
 from src.services.playoff import FINAL_MATCH
-from src.services.standings import StandingRow, compute_standings, rank_third_places
+from src.services.standings import (
+    THIRD_PLACES_QUALIFY,
+    StandingRow,
+    compute_standings,
+    rank_third_places,
+)
 
 STAGE_ORDER = ["R32", "R16", "QF", "SF", "THIRD", "FINAL"]
 _STAGE_BY_NUM = {num: stage for stage, num, _h, _a in BRACKET}
@@ -77,7 +82,7 @@ async def build_report_data(session: AsyncSession, user_id: int) -> ReportData:
 
     ranked = rank_third_places(thirds_raw)
     for i, (letter, row) in enumerate(ranked):
-        data.thirds.append(ThirdRow(letter=letter, row=row, qualified=i < 8))
+        data.thirds.append(ThirdRow(letter=letter, row=row, qualified=i < THIRD_PLACES_QUALIFY))
 
     # Плей-офф по раундам.
     preds = await repo.get_bracket_preds(session, user_id)
@@ -107,9 +112,7 @@ async def build_report_data(session: AsyncSession, user_id: int) -> ReportData:
     if final and final.winner_team_id:
         data.champion = name(final.winner_team_id)
         data.runner_up = name(
-            final.away_team_id
-            if final.home_team_id == final.winner_team_id
-            else final.home_team_id
+            final.away_team_id if final.home_team_id == final.winner_team_id else final.home_team_id
         )
     if third and third.winner_team_id:
         data.third_place = name(third.winner_team_id)

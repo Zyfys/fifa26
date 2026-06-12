@@ -62,14 +62,23 @@ def test_goal_difference_breaks_tie():
     assert rows[1].team_id == 1
 
 
-def test_head_to_head_breaks_equal_points_and_gd():
-    # Две команды с равными очками/разницей/голами — решает личная встреча.
-    teams = [(1, "А"), (2, "Б")]
+def test_head_to_head_breaks_full_tie():
+    # Две команды действительно равны по очкам/разнице/забитым,
+    # порядок решает личная встреча — против алфавита, чтобы отличить от фолбэка.
+    teams = [(1, "Бразилия"), (2, "Аргентина"), (3, "Гана"), (4, "Дания")]
     results = [
-        MatchResult(1, 2, 2, 1),  # очная встреча: 1 побеждает
+        MatchResult(1, 2, 2, 1),  # личная встреча: Бразилия побеждает Аргентину
+        MatchResult(1, 3, 1, 2),  # Бразилия проигрывает Гане
+        MatchResult(2, 4, 2, 1),  # Аргентина побеждает Данию
     ]
     rows = compute_standings(teams, results)
-    assert rows[0].team_id == 1
+    by_id = {r.team_id: r for r in rows}
+    # Проверяем, что тай-брейк действительно сработал: показатели равны.
+    assert (by_id[1].points, by_id[1].gd, by_id[1].gf) == (3, 0, 3)
+    assert (by_id[2].points, by_id[2].gd, by_id[2].gf) == (3, 0, 3)
+    pos = {r.team_id: i for i, r in enumerate(rows)}
+    # По алфавиту Аргентина была бы выше; личная встреча ставит Бразилию выше.
+    assert pos[1] < pos[2]
 
 
 def test_deterministic_alphabetical_fallback():

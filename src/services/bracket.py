@@ -11,6 +11,10 @@
 
 from __future__ import annotations
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 STAGE_NAMES: dict[str, str] = {
     "R32": "1/16 финала",
     "R16": "1/8 финала",
@@ -45,9 +49,7 @@ def assign_thirds(qualified_groups: set[str]) -> dict[int, str]:
     (поиск идеального паросочетания с возвратом).
     """
     if len(qualified_groups) != len(THIRD_SLOTS):
-        raise ValueError(
-            f"Ожидается {len(THIRD_SLOTS)} групп, получено {len(qualified_groups)}"
-        )
+        raise ValueError(f"Ожидается {len(THIRD_SLOTS)} групп, получено {len(qualified_groups)}")
 
     result: dict[int, str] = {}
     used: set[str] = set()
@@ -72,7 +74,18 @@ def assign_thirds(qualified_groups: set[str]) -> dict[int, str]:
     # Фолбэк (теоретически недостижим при корректных наборах FIFA):
     # раскидать оставшиеся группы по слотам без учёта ограничений.
     leftover = sorted(qualified_groups)
-    return {slot: leftover[i] for i, slot in enumerate(THIRD_SLOTS)}
+    fallback = {slot: leftover[i] for i, slot in enumerate(THIRD_SLOTS)}
+    violations = {
+        slot: group for slot, group in fallback.items() if group not in THIRD_SLOT_ALLOWED[slot]
+    }
+    logger.error(
+        "assign_thirds: идеальное паросочетание не найдено для групп %s; "
+        "фолбэк нарушает ограничения слотов: %s (назначение: %s)",
+        leftover,
+        violations,
+        fallback,
+    )
+    return fallback
 
 
 def is_group_source(code: str) -> bool:
