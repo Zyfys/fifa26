@@ -6,7 +6,7 @@ import datetime
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import aliased, joinedload
 
 from src.models import (
     AwardPrediction,
@@ -394,6 +394,35 @@ async def get_bracket_pred(
             BracketPrediction.match_number == match_number,
         )
     )
+
+
+async def get_group_predictions(
+    session: AsyncSession, user_id: int
+) -> list[tuple[str, str, str, int, int]]:
+    """Все групповые прогнозы пользователя с названиями команд.
+
+    Возвращает кортежи (буква группы, хозяева, гости, счёт хозяев, счёт гостей),
+    упорядоченные по группе и номеру матча — для просмотра «Мои прогнозы».
+    """
+    home = aliased(Team)
+    away = aliased(Team)
+    stmt = (
+        select(
+            Group.letter,
+            home.name,
+            away.name,
+            GroupPrediction.home_score,
+            GroupPrediction.away_score,
+        )
+        .join(GroupMatch, GroupMatch.id == GroupPrediction.group_match_id)
+        .join(Group, Group.id == GroupMatch.group_id)
+        .join(home, home.id == GroupMatch.home_team_id)
+        .join(away, away.id == GroupMatch.away_team_id)
+        .where(GroupPrediction.user_id == user_id)
+        .order_by(Group.letter, GroupMatch.match_number)
+    )
+    rows = await session.execute(stmt)
+    return [(r[0], r[1], r[2], r[3], r[4]) for r in rows]
 
 
 async def get_group_results(

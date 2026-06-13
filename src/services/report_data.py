@@ -7,15 +7,11 @@ from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.data.wc2026 import BRACKET
 from src.db import repo
 from src.services.awards import AWARD_DISPLAY, FORMATION, POSITION_LABEL
-from src.services.bracket import STAGE_NAMES
+from src.services.bracket import STAGE_BY_NUM, STAGE_NAMES, STAGE_ORDER
 from src.services.playoff import FINAL_MATCH
 from src.services.standings import StandingRow, compute_standings, rank_third_places
-
-STAGE_ORDER = ["R32", "R16", "QF", "SF", "THIRD", "FINAL"]
-_STAGE_BY_NUM = {num: stage for stage, num, _h, _a in BRACKET}
 
 
 @dataclass
@@ -87,7 +83,7 @@ async def build_report_data(session: AsyncSession, user_id: int) -> ReportData:
 
     for stage in STAGE_ORDER:
         matches = []
-        for num in sorted(n for n in preds if _STAGE_BY_NUM.get(n) == stage):
+        for num in sorted(n for n in preds if STAGE_BY_NUM.get(n) == stage):
             p = preds[num]
             bm = BracketMatch(
                 home=name(p.home_team_id),

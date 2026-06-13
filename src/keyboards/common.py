@@ -6,11 +6,16 @@ from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 
-def start_keyboard(*, has_progress: bool) -> InlineKeyboardMarkup:
-    """Кнопка начала/продолжения прогноза."""
+def start_keyboard(
+    *, has_progress: bool, has_predictions: bool = False
+) -> InlineKeyboardMarkup:
+    """Кнопка начала/продолжения прогноза (+ «Мои прогнозы», если есть что показать)."""
     text = "▶️ Продолжить прогноз" if has_progress else "⚽ Начать прогноз"
     builder = InlineKeyboardBuilder()
     builder.button(text=text, callback_data="begin")
+    if has_predictions:
+        builder.button(text="📋 Мои прогнозы", callback_data="my_open")
+    builder.adjust(1)
     return builder.as_markup()
 
 
@@ -39,7 +44,17 @@ def group_done_keyboard() -> InlineKeyboardMarkup:
     """После завершения группового этапа."""
     builder = InlineKeyboardBuilder()
     builder.button(text="📊 Показать таблицы групп", callback_data="show_tables")
+    builder.button(text="📋 Мои прогнозы", callback_data="my_open")
     builder.button(text="🏆 Перейти к плей-офф", callback_data="to_playoff")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def my_forecast_menu_keyboard() -> InlineKeyboardMarkup:
+    """Меню просмотра «Мои прогнозы»: группы / плей-офф."""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="⚽ Группы", callback_data="myf:groups")
+    builder.button(text="🏆 Плей-офф", callback_data="myf:playoff")
     builder.adjust(1)
     return builder.as_markup()
 

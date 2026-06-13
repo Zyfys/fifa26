@@ -30,7 +30,10 @@ async def cmd_start(message: Message, session: AsyncSession) -> None:
     await session.commit()
     done = await repo.count_group_predictions(session, user.id)
     has_progress = 0 < done < repo.GROUP_MATCHES_TOTAL
-    await message.answer(WELCOME, reply_markup=start_keyboard(has_progress=has_progress))
+    await message.answer(
+        WELCOME,
+        reply_markup=start_keyboard(has_progress=has_progress, has_predictions=done > 0),
+    )
 
 
 @router.callback_query(F.data == "begin")

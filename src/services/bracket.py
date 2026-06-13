@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+from src.data.wc2026 import BRACKET
+
 STAGE_NAMES: dict[str, str] = {
     "R32": "1/16 финала",
     "R16": "1/8 финала",
@@ -19,6 +21,10 @@ STAGE_NAMES: dict[str, str] = {
     "THIRD": "Матч за 3-е место",
     "FINAL": "Финал",
 }
+
+# Порядок стадий от 1/16 до финала и привязка номера матча сетки к стадии.
+STAGE_ORDER: list[str] = ["R32", "R16", "QF", "SF", "THIRD", "FINAL"]
+STAGE_BY_NUM: dict[int, str] = {num: stage for stage, num, _h, _a in BRACKET}
 
 # Слоты R32, куда попадают третьи места, и разрешённые группы для каждого
 # (по сетке из docs/tournament-format.md).
