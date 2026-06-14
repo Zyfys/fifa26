@@ -9,8 +9,16 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramAPIError
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import CallbackQuery, ErrorEvent, Message
+from aiogram.types import (
+    BotCommand,
+    BotCommandScopeChat,
+    BotCommandScopeDefault,
+    CallbackQuery,
+    ErrorEvent,
+    Message,
+)
 
 from src.config import settings
 from src.handlers import build_root_router
@@ -35,6 +43,32 @@ async def on_error(event: ErrorEvent) -> None:
         logging.exception("Не удалось уведомить пользователя об ошибке.")
 
 
+# Команды в меню бота (синяя кнопка «/»).
+PUBLIC_COMMANDS = [
+    BotCommand(command="start", description="Начать / продолжить прогноз"),
+    BotCommand(command="my", description="Мои прогнозы"),
+    BotCommand(command="score", description="Моя точность"),
+    BotCommand(command="top", description="Рейтинг точности"),
+    BotCommand(command="reset", description="Сбросить прогноз"),
+]
+ADMIN_COMMANDS = PUBLIC_COMMANDS + [
+    BotCommand(command="results", description="Внести результаты (админ)"),
+    BotCommand(command="stats", description="Статистика (админ)"),
+]
+
+
+async def setup_commands(bot: Bot) -> None:
+    """Зарегистрировать команды в меню: общие — всем, админские — в чатах админов."""
+    await bot.set_my_commands(PUBLIC_COMMANDS, scope=BotCommandScopeDefault())
+    for admin_id in settings.admin_id_set:
+        try:
+            await bot.set_my_commands(
+                ADMIN_COMMANDS, scope=BotCommandScopeChat(chat_id=admin_id)
+            )
+        except TelegramAPIError:
+            logging.warning("Не задал команды для админа %s", admin_id)
+
+
 def build_dispatcher() -> Dispatcher:
     dp = Dispatcher(storage=MemoryStorage())
     # Throttling — ПЕРЕД сессией БД: флуд отсекается до открытия соединения.
@@ -52,6 +86,7 @@ async def main() -> None:
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dp = build_dispatcher()
+    await setup_commands(bot)
     logging.info("Бот запущен, начинаю polling.")
     tasks = [
         asyncio.create_task(ingest_loop(bot)),  # вечером: автозапись результатов

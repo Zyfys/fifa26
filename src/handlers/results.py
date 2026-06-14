@@ -48,8 +48,10 @@ async def cmd_results(message: Message, session: AsyncSession) -> None:
     done = await repo.count_actual_results(session)
     await message.answer(
         f"🧮 <b>Реальные результаты</b>\n\nВнесено: <b>{done}/{GROUP_TOTAL}</b>\n\n"
-        "Результаты пишутся автоматически раз в день. Здесь — вручную:",
-        reply_markup=results_entry_keyboard(with_fetch=settings.autofetch_enabled),
+        "Внеси счёт вручную:",
+        reply_markup=results_entry_keyboard(
+            with_fetch=settings.autofetch_enabled and settings.results_auto
+        ),
     )
 
 
@@ -185,8 +187,8 @@ def _seconds_until_hour(hour: int) -> float:
 
 async def ingest_loop(bot: Bot) -> None:
     """Вечером: автопоиск результатов и автозапись. Шлёт админу краткий отчёт."""
-    if not settings.autofetch_enabled:
-        logger.info("Автозапись результатов выключена (нет ключей Tavily/Groq или админов).")
+    if not (settings.autofetch_enabled and settings.results_auto):
+        logger.info("Авто-запись результатов выключена (RESULTS_AUTO=false или нет ключей).")
         return
     admin_id = sorted(settings.admin_id_set)[0]
     while True:
@@ -205,6 +207,9 @@ async def ingest_loop(bot: Bot) -> None:
 
 async def digest_loop(bot: Bot) -> None:
     """Утром: рассылка каждому игроку его сводки по новым результатам."""
+    if not settings.results_auto:
+        logger.info("Утренняя рассылка выключена (RESULTS_AUTO=false).")
+        return
     while True:
         await asyncio.sleep(_seconds_until_hour(settings.digest_hour))
         try:

@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     # Час суток (0–23): вечерний автопоиск+автозапись результатов и утренняя рассылка сводок.
     results_fetch_hour: int = Field(default=23, alias="RESULTS_FETCH_HOUR")
     digest_hour: int = Field(default=9, alias="DIGEST_HOUR")
+    # Мастер-переключатель авто-режима (ночная авто-запись из веба + утренняя рассылка).
+    # По умолчанию ВЫКЛ: веб-поиск результатов оказался ненадёжным. Ручной ввод /results
+    # и команды /score, /top работают независимо от этого флага.
+    results_auto: bool = Field(default=False, alias="RESULTS_AUTO")
 
     @property
     def admin_id_set(self) -> set[int]:
