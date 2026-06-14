@@ -7,6 +7,7 @@ from src.models.predictions import (
     TeamOfTournamentPick,
 )
 from src.models.reference import BracketSlot, Group, GroupMatch, Player, Team
+from src.models.results import ActualResult
 from src.models.user import User
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "BracketPrediction",
     "AwardPrediction",
     "TeamOfTournamentPick",
+    "ActualResult",
 ]

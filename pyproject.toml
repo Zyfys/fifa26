@@ -5,6 +5,7 @@ description = "Telegram-бот «Прогноз Чемпионата мира 20
 requires-python = ">=3.11"
 dependencies = [
     "aiogram>=3.13",
+    "aiohttp>=3.10",  # HTTP-клиент для Tavily/Groq (идёт и как зависимость aiogram)
     "sqlalchemy[asyncio]>=2.0",
     "asyncpg>=0.29",
     "alembic>=1.13",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 
 from aiogram import Bot, Dispatcher
@@ -13,6 +14,7 @@ from aiogram.types import CallbackQuery, ErrorEvent, Message
 
 from src.config import settings
 from src.handlers import build_root_router
+from src.handlers.results import autofetch_loop
 from src.middlewares import DbSessionMiddleware, ThrottlingMiddleware
 
 ERROR_TEXT = "⚠️ Что-то пошло не так. Попробуйте /start."
@@ -51,7 +53,13 @@ async def main() -> None:
     )
     dp = build_dispatcher()
     logging.info("Бот запущен, начинаю polling.")
-    await dp.start_polling(bot)
+    fetch_task = asyncio.create_task(autofetch_loop(bot, dp))
+    try:
+        await dp.start_polling(bot)
+    finally:
+        fetch_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await fetch_task
 
 
 if __name__ == "__main__":

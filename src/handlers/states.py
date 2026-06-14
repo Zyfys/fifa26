@@ -22,3 +22,10 @@ class Awards(StatesGroup):
     choosing_team = State()
     choosing_player = State()
     waiting_goals = State()  # число голов бомбардира
+
+
+class Results(StatesGroup):
+    """Админ: ввод реальных результатов матчей (источник истины для точности)."""
+
+    confirming = State()  # показан черновик Tavily/Groq, ждём подтверждения
+    manual_score = State()  # ручной ввод счёта по матчам

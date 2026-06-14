@@ -51,10 +51,31 @@ def group_done_keyboard() -> InlineKeyboardMarkup:
 
 
 def my_forecast_menu_keyboard() -> InlineKeyboardMarkup:
-    """Меню просмотра «Мои прогнозы»: группы / плей-офф."""
+    """Меню просмотра «Мои прогнозы»: группы / плей-офф / точность."""
     builder = InlineKeyboardBuilder()
     builder.button(text="⚽ Группы", callback_data="myf:groups")
     builder.button(text="🏆 Плей-офф", callback_data="myf:playoff")
+    builder.button(text="🎯 Моя точность", callback_data="myf:accuracy")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def results_entry_keyboard(*, with_fetch: bool) -> InlineKeyboardMarkup:
+    """Админ: выбор способа ввода реальных результатов."""
+    builder = InlineKeyboardBuilder()
+    if with_fetch:
+        builder.button(text="🌐 Найти (Tavily)", callback_data="res:fetch")
+    builder.button(text="🔢 По матчам", callback_data="res:manual")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def results_confirm_keyboard() -> InlineKeyboardMarkup:
+    """Админ: подтверждение найденного черновика результатов."""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Сохранить", callback_data="res:save")
+    builder.button(text="🔢 Ввести кнопками", callback_data="res:manual")
+    builder.button(text="❌ Отмена", callback_data="res:cancel")
     builder.adjust(1)
     return builder.as_markup()
 

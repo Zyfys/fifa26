@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, joinedload
 
 from src.models import (
+    ActualResult,
     AwardPrediction,
     BracketPrediction,
     Group,
@@ -444,3 +445,75 @@ async def get_group_results(
         MatchResult(home_id=r[0], away_id=r[1], home_score=r[2], away_score=r[3])
         for r in rows
     ]
+
+
+# --- Фактические результаты (источник истины для точности прогнозов) ---
+
+async def upsert_actual_result(
+    session: AsyncSession, match_number: int, home_score: int, away_score: int
+) -> None:
+    existing = await session.get(ActualResult, match_number)
+    if existing is None:
+        session.add(
+            ActualResult(
+                match_number=match_number,
+                home_score=home_score,
+                away_score=away_score,
+            )
+        )
+    else:
+        existing.home_score = home_score
+        existing.away_score = away_score
+
+
+async def get_actual_results(session: AsyncSession) -> dict[int, tuple[int, int]]:
+    """match_number → (счёт хозяев, счёт гостей) по всем внесённым результатам."""
+    rows = await session.execute(
+        select(
+            ActualResult.match_number,
+            ActualResult.home_score,
+            ActualResult.away_score,
+        )
+    )
+    return {r[0]: (r[1], r[2]) for r in rows}
+
+
+async def count_actual_results(session: AsyncSession) -> int:
+    return await session.scalar(
+        select(func.count()).select_from(ActualResult)
+    ) or 0
+
+
+async def get_unfilled_group_matches(session: AsyncSession) -> list[GroupMatch]:
+    """Групповые матчи (1..72) без внесённого реального результата, по номеру."""
+    filled = select(ActualResult.match_number)
+    stmt = (
+        select(GroupMatch)
+        .where(GroupMatch.match_number.notin_(filled))
+        .order_by(GroupMatch.match_number)
+        .options(
+            joinedload(GroupMatch.home_team),
+            joinedload(GroupMatch.away_team),
+            joinedload(GroupMatch.group),
+        )
+    )
+    return list(await session.scalars(stmt))
+
+
+async def list_group_fixtures(
+    session: AsyncSession,
+) -> list[tuple[int, str, str]]:
+    """Все групповые матчи: (match_number, хозяева, гости) — по номеру.
+
+    Для промпта Tavily/Groq и сопоставления распознанных результатов с расписанием.
+    """
+    home = aliased(Team)
+    away = aliased(Team)
+    stmt = (
+        select(GroupMatch.match_number, home.name, away.name)
+        .join(home, home.id == GroupMatch.home_team_id)
+        .join(away, away.id == GroupMatch.away_team_id)
+        .order_by(GroupMatch.match_number)
+    )
+    rows = await session.execute(stmt)
+    return [(r[0], r[1], r[2]) for r in rows]

@@ -16,9 +16,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.db import repo
 from src.handlers.callbacks import accessible_message
 from src.keyboards.common import my_forecast_menu_keyboard
+from src.services.accuracy import (
+    Accuracy,
+    compute_leaderboard,
+    compute_user_accuracy,
+)
 from src.services.bracket import STAGE_BY_NUM, STAGE_NAMES, STAGE_ORDER
 
 router = Router()
+
+TOP_LIMIT = 10
 
 _MENU_TEXT = "📋 <b>Твой прогноз</b>\n\nВыбери раздел:"
 _NO_FORECAST = "У тебя ещё нет прогноза. Нажми /start, чтобы начать."
@@ -90,6 +97,86 @@ async def on_my_playoff(call: CallbackQuery, session: AsyncSession) -> None:
         blocks,
         "Плей-офф ещё не заполнен.",
     )
+
+
+# --- Точность прогноза + рейтинг ---
+
+def _who(username: str | None, telegram_id: int) -> str:
+    return f"@{username}" if username else f"id{telegram_id}"
+
+
+def _format_accuracy(acc: Accuracy) -> str:
+    if acc.played == 0:
+        return (
+            "🎯 <b>Твоя точность</b>\n\n"
+            "Реальные результаты ещё не внесены — статистика появится, "
+            "когда сыграют матчи."
+        )
+    return (
+        "🎯 <b>Твоя точность</b> (групповой этап)\n\n"
+        f"Сыграно матчей с твоим прогнозом: <b>{acc.played}</b>\n"
+        f"Угадано исходов: <b>{acc.outcomes}/{acc.played}</b> ({acc.outcome_pct}%)\n"
+        f"Точные счета: <b>{acc.exacts}/{acc.played}</b> ({acc.exact_pct}%)"
+    )
+
+
+async def _show_accuracy(message: Message, session: AsyncSession, user_id: int) -> None:
+    acc = await compute_user_accuracy(session, user_id)
+    await message.answer(_format_accuracy(acc))
+
+
+@router.message(Command("score"))
+async def cmd_score(message: Message, session: AsyncSession) -> None:
+    user = await repo.get_or_create_user(
+        session, message.from_user.id, message.from_user.username
+    )
+    await session.commit()
+    await _show_accuracy(message, session, user.id)
+
+
+@router.callback_query(F.data == "myf:accuracy")
+async def on_my_accuracy(call: CallbackQuery, session: AsyncSession) -> None:
+    msg = await accessible_message(call)
+    if msg is None:
+        return
+    user = await repo.get_or_create_user(
+        session, call.from_user.id, call.from_user.username
+    )
+    await call.answer()
+    await _show_accuracy(msg, session, user.id)
+
+
+@router.message(Command("top"))
+async def cmd_top(message: Message, session: AsyncSession) -> None:
+    user = await repo.get_or_create_user(
+        session, message.from_user.id, message.from_user.username
+    )
+    await session.commit()
+    board = await compute_leaderboard(session)
+    if not board:
+        await message.answer(
+            "🏆 Рейтинг пуст — реальные результаты ещё не внесены."
+        )
+        return
+
+    lines = ["🏆 <b>Рейтинг точности</b> (групповой этап)", "<pre>"]
+    for i, row in enumerate(board[:TOP_LIMIT], start=1):
+        mark = "→" if row.user_id == user.id else " "
+        name = _who(row.username, row.telegram_id)[:16].ljust(16)
+        lines.append(
+            f"{mark}{i:2}. {name} тчн {row.accuracy.exacts:2} исх {row.accuracy.outcomes:2}"
+        )
+    lines.append("</pre>")
+
+    pos = next((i for i, r in enumerate(board, start=1) if r.user_id == user.id), None)
+    if pos is None:
+        lines.append("\nУ тебя пока нет матчей с результатом.")
+    elif pos > TOP_LIMIT:
+        my = board[pos - 1].accuracy
+        lines.append(
+            f"\nТвоё место: {pos} — точные {my.exacts}, исходы {my.outcomes} из {my.played}"
+        )
+    await message.answer("\n".join(lines))
 
 
 # --- Форматирование ---
