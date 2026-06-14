@@ -29,8 +29,9 @@ class Settings(BaseSettings):
     groq_api_key: str = Field(default="", alias="GROQ_API_KEY")
     groq_model: str = Field(default="llama-3.3-70b-versatile", alias="GROQ_MODEL")
     tavily_api_key: str = Field(default="", alias="TAVILY_API_KEY")
-    # Час суток (0–23) для дневного автопоиска результатов; пусто — берётся 23.
+    # Час суток (0–23): вечерний автопоиск+автозапись результатов и утренняя рассылка сводок.
     results_fetch_hour: int = Field(default=23, alias="RESULTS_FETCH_HOUR")
+    digest_hour: int = Field(default=9, alias="DIGEST_HOUR")
 
     @property
     def admin_id_set(self) -> set[int]:

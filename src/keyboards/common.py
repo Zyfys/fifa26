@@ -61,21 +61,11 @@ def my_forecast_menu_keyboard() -> InlineKeyboardMarkup:
 
 
 def results_entry_keyboard(*, with_fetch: bool) -> InlineKeyboardMarkup:
-    """Админ: выбор способа ввода реальных результатов."""
+    """Админ: ручной ввод реальных результатов (поиск с автозаписью / по матчам)."""
     builder = InlineKeyboardBuilder()
     if with_fetch:
-        builder.button(text="🌐 Найти (Tavily)", callback_data="res:fetch")
+        builder.button(text="🌐 Найти и записать сейчас", callback_data="res:fetch")
     builder.button(text="🔢 По матчам", callback_data="res:manual")
-    builder.adjust(1)
-    return builder.as_markup()
-
-
-def results_confirm_keyboard() -> InlineKeyboardMarkup:
-    """Админ: подтверждение найденного черновика результатов."""
-    builder = InlineKeyboardBuilder()
-    builder.button(text="✅ Сохранить", callback_data="res:save")
-    builder.button(text="🔢 Ввести кнопками", callback_data="res:manual")
-    builder.button(text="❌ Отмена", callback_data="res:cancel")
     builder.adjust(1)
     return builder.as_markup()
 

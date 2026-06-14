@@ -1,8 +1,10 @@
-"""Админ: ввод реальных результатов матчей (источник истины для точности).
+"""Реальные результаты матчей (источник истины для точности прогнозов).
 
-Два пути: автопоиск Tavily→Groq с подтверждением и ручной ввод по матчам кнопками.
-Плюс дневной фоновый автопоиск, присылающий админу черновик на подтверждение.
-Доступ — только ADMIN_IDS (как /stats); для остальных команда молча игнорируется.
+Автоматика:
+  • вечером — фоновый автопоиск Tavily→Groq, СРАЗУ пишет распознанные результаты;
+  • утром — рассылка каждому игроку сводки «его прогноз vs реальный счёт».
+Админ (ADMIN_IDS):
+  • /results — найти и записать сейчас (то же, но по кнопке) или ввести/исправить вручную.
 """
 
 from __future__ import annotations
@@ -10,12 +12,11 @@ from __future__ import annotations
 import asyncio
 import datetime
 import logging
-from dataclasses import asdict
 
-from aiogram import Bot, Dispatcher, F, Router
+from aiogram import Bot, F, Router
+from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.storage.base import StorageKey
 from aiogram.types import CallbackQuery, Message, User
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,12 +26,9 @@ from src.db import repo
 from src.db.session import async_session
 from src.handlers.callbacks import accessible_message
 from src.handlers.states import Results
-from src.keyboards.common import (
-    results_confirm_keyboard,
-    results_entry_keyboard,
-    score_keyboard,
-)
-from src.services.results_ingest import IngestResult, fetch_candidates
+from src.keyboards.common import results_entry_keyboard, score_keyboard
+from src.services.digest import send_daily_digests
+from src.services.results_ingest import IngestResult, auto_ingest
 from src.services.scores import parse_score, score_error_message
 
 logger = logging.getLogger(__name__)
@@ -50,99 +48,41 @@ async def cmd_results(message: Message, session: AsyncSession) -> None:
     done = await repo.count_actual_results(session)
     await message.answer(
         f"🧮 <b>Реальные результаты</b>\n\nВнесено: <b>{done}/{GROUP_TOTAL}</b>\n\n"
-        "Как внести результаты?",
+        "Результаты пишутся автоматически раз в день. Здесь — вручную:",
         reply_markup=results_entry_keyboard(with_fetch=settings.autofetch_enabled),
     )
 
 
-# --- Путь Tavily/Groq: автопоиск → подтверждение ---
-
-@router.callback_query(F.data == "res:fetch")
-async def on_res_fetch(
-    call: CallbackQuery, state: FSMContext, session: AsyncSession
-) -> None:
-    if not _is_admin(call.from_user):
-        await call.answer()
-        return
-    msg = await accessible_message(call)
-    if msg is None:
-        return
-    await call.answer("Ищу результаты…")
-    ingest = await fetch_candidates(session)
-    await _present_draft(call.bot, state, msg.chat.id, ingest)
-
-
-def _render_draft(ingest: IngestResult) -> str:
-    lines = ["🌐 <b>Нашёл результаты</b> (черновик):", "<pre>"]
-    for m in ingest.matched:
-        lines.append(f"{m.home} {m.home_score}:{m.away_score} {m.away}")
-    lines.append("</pre>")
+def _render_ingest_report(ingest: IngestResult) -> str:
+    if not ingest.matched and not ingest.unmatched:
+        return f"🌐 {ingest.note or 'ничего не нашёл.'}"
+    lines: list[str] = []
+    if ingest.matched:
+        lines.append(f"✅ <b>Записал {len(ingest.matched)}:</b>")
+        lines += [f"{m.home} {m.home_score}:{m.away_score} {m.away}" for m in ingest.matched]
     if ingest.unmatched:
         lines.append("")
-        lines.append("⚠️ Не распознал (при необходимости введи вручную):")
+        lines.append("⚠️ Не распознал (внеси вручную: /results):")
         for u in ingest.unmatched:
             p = u.parsed
             lines.append(f"• {p.home} {p.home_score}:{p.away_score} {p.away} — {u.reason}")
-    lines.append("")
-    lines.append(f"Сохранить {len(ingest.matched)} результат(ов)?")
     return "\n".join(lines)
 
 
-async def _present_draft(
-    bot: Bot,
-    state: FSMContext,
-    chat_id: int,
-    ingest: IngestResult,
-    *,
-    notify_empty: bool = True,
-) -> None:
-    if not ingest.matched:
-        if notify_empty:
-            note = ingest.note or "ничего не нашёл. Попробуй вручную: /results"
-            await bot.send_message(chat_id, f"🌐 {note}")
-        return
-    await state.set_state(Results.confirming)
-    await state.update_data(draft=[asdict(m) for m in ingest.matched])
-    await bot.send_message(
-        chat_id, _render_draft(ingest), reply_markup=results_confirm_keyboard()
-    )
-
-
-@router.callback_query(Results.confirming, F.data == "res:save")
-async def on_res_save(
-    call: CallbackQuery, state: FSMContext, session: AsyncSession
-) -> None:
+@router.callback_query(F.data == "res:fetch")
+async def on_res_fetch(call: CallbackQuery, session: AsyncSession) -> None:
     if not _is_admin(call.from_user):
         await call.answer()
         return
     msg = await accessible_message(call)
     if msg is None:
         return
-    data = await state.get_data()
-    draft = data.get("draft") or []
-    for d in draft:
-        await repo.upsert_actual_result(
-            session, d["match_number"], d["home_score"], d["away_score"]
-        )
-    await session.commit()
-    await state.clear()
-    done = await repo.count_actual_results(session)
-    await call.answer("Сохранено")
-    await msg.edit_reply_markup(reply_markup=None)
-    await msg.answer(f"✅ Сохранено: {len(draft)}. Внесено всего: {done}/{GROUP_TOTAL}.")
+    await call.answer("Ищу и записываю…")
+    ingest = await auto_ingest(session)
+    await msg.answer(_render_ingest_report(ingest))
 
 
-@router.callback_query(F.data == "res:cancel")
-async def on_res_cancel(call: CallbackQuery, state: FSMContext) -> None:
-    msg = await accessible_message(call)
-    if msg is None:
-        return
-    await state.clear()
-    await call.answer("Отменено")
-    await msg.edit_reply_markup(reply_markup=None)
-
-
-# --- Путь ручного ввода по матчам ---
+# --- Ручной ввод/исправление по матчам ---
 
 @router.callback_query(F.data == "res:manual")
 async def on_res_manual(
@@ -233,7 +173,7 @@ async def on_manual_text(
     await _save_manual(message, state, session, home, away)
 
 
-# --- Дневной фоновый автопоиск ---
+# --- Дневные фоновые задачи ---
 
 def _seconds_until_hour(hour: int) -> float:
     now = datetime.datetime.now()
@@ -243,19 +183,34 @@ def _seconds_until_hour(hour: int) -> float:
     return (target - now).total_seconds()
 
 
-async def autofetch_loop(bot: Bot, dp: Dispatcher) -> None:
-    """Раз в сутки ищет результаты и шлёт первому админу черновик на подтверждение."""
+async def ingest_loop(bot: Bot) -> None:
+    """Вечером: автопоиск результатов и автозапись. Шлёт админу краткий отчёт."""
     if not settings.autofetch_enabled:
-        logger.info("Автопоиск результатов выключен (нет ключей Tavily/Groq или админов).")
+        logger.info("Автозапись результатов выключена (нет ключей Tavily/Groq или админов).")
         return
     admin_id = sorted(settings.admin_id_set)[0]
     while True:
         await asyncio.sleep(_seconds_until_hour(settings.results_fetch_hour))
         try:
             async with async_session() as session:
-                ingest = await fetch_candidates(session)
-            key = StorageKey(bot_id=bot.id, chat_id=admin_id, user_id=admin_id)
-            state = FSMContext(storage=dp.storage, key=key)
-            await _present_draft(bot, state, admin_id, ingest, notify_empty=False)
+                ingest = await auto_ingest(session)
+            if ingest.matched or ingest.unmatched:
+                try:
+                    await bot.send_message(admin_id, _render_ingest_report(ingest))
+                except TelegramAPIError:
+                    logger.warning("Не доставил отчёт автозаписи админу")
         except Exception:  # noqa: BLE001 — цикл не должен падать
-            logger.exception("Автопоиск результатов: ошибка цикла")
+            logger.exception("Автозапись результатов: ошибка цикла")
+
+
+async def digest_loop(bot: Bot) -> None:
+    """Утром: рассылка каждому игроку его сводки по новым результатам."""
+    while True:
+        await asyncio.sleep(_seconds_until_hour(settings.digest_hour))
+        try:
+            async with async_session() as session:
+                sent = await send_daily_digests(bot, session)
+            if sent:
+                logger.info("Утренняя сводка отправлена: %s игрокам", sent)
+        except Exception:  # noqa: BLE001 — цикл не должен падать
+            logger.exception("Утренняя сводка: ошибка цикла")

@@ -49,8 +49,24 @@ async def fetch_candidates(
         text, unfilled, api_key=settings.groq_api_key, model=settings.groq_model
     )
     matched, unmatched = match_results_to_fixtures(parsed, fixtures_all)
-    # Не перезаписываем уже подтверждённые результаты автоматически.
+    # Не перезаписываем уже внесённые результаты автоматически.
     matched = [m for m in matched if m.match_number not in filled]
     if not matched and not unmatched:
         return IngestResult(note="не нашёл сыгранных матчей из числа незаполненных")
     return IngestResult(matched=matched, unmatched=unmatched)
+
+
+async def auto_ingest(session: AsyncSession) -> IngestResult:
+    """Найти результаты и СРАЗУ записать распознанные (без подтверждения).
+
+    Пишет только уверенно сопоставленные с расписанием (барьер result_matching);
+    нераспознанное не пишет — остаётся в `unmatched` для ручного ввода/исправления.
+    """
+    ingest = await fetch_candidates(session)
+    for m in ingest.matched:
+        await repo.upsert_actual_result(
+            session, m.match_number, m.home_score, m.away_score
+        )
+    if ingest.matched:
+        await session.commit()
+    return ingest

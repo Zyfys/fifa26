@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import datetime
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, joinedload
 
@@ -452,6 +452,8 @@ async def get_group_results(
 async def upsert_actual_result(
     session: AsyncSession, match_number: int, home_score: int, away_score: int
 ) -> None:
+    """Вставить/обновить реальный счёт. Сбрасывает digested — новый/исправленный
+    результат попадёт в ближайшую утреннюю сводку пользователям."""
     existing = await session.get(ActualResult, match_number)
     if existing is None:
         session.add(
@@ -459,11 +461,72 @@ async def upsert_actual_result(
                 match_number=match_number,
                 home_score=home_score,
                 away_score=away_score,
+                digested=False,
             )
         )
     else:
         existing.home_score = home_score
         existing.away_score = away_score
+        existing.digested = False
+
+
+async def get_undigested_results(
+    session: AsyncSession,
+) -> list[tuple[int, str, str, int, int]]:
+    """Результаты без разосланной сводки: (match_number, хозяева, гости, счёт хозяев, гостей)."""
+    home = aliased(Team)
+    away = aliased(Team)
+    stmt = (
+        select(
+            ActualResult.match_number,
+            home.name,
+            away.name,
+            ActualResult.home_score,
+            ActualResult.away_score,
+        )
+        .join(GroupMatch, GroupMatch.match_number == ActualResult.match_number)
+        .join(home, home.id == GroupMatch.home_team_id)
+        .join(away, away.id == GroupMatch.away_team_id)
+        .where(ActualResult.digested.is_(False))
+        .order_by(ActualResult.match_number)
+    )
+    rows = await session.execute(stmt)
+    return [(r[0], r[1], r[2], r[3], r[4]) for r in rows]
+
+
+async def mark_results_digested(
+    session: AsyncSession, match_numbers: list[int]
+) -> None:
+    if not match_numbers:
+        return
+    await session.execute(
+        update(ActualResult)
+        .where(ActualResult.match_number.in_(match_numbers))
+        .values(digested=True)
+    )
+
+
+async def get_users_with_group_predictions(session: AsyncSession) -> list[User]:
+    """Пользователи, у которых есть хотя бы один групповой прогноз (для рассылки)."""
+    answered = select(GroupPrediction.user_id).distinct()
+    return list(await session.scalars(select(User).where(User.id.in_(answered))))
+
+
+async def get_user_pred_by_match(
+    session: AsyncSession, user_id: int
+) -> dict[int, tuple[int, int]]:
+    """match_number → (счёт хозяев, гостей) из прогноза пользователя."""
+    stmt = (
+        select(
+            GroupMatch.match_number,
+            GroupPrediction.home_score,
+            GroupPrediction.away_score,
+        )
+        .join(GroupMatch, GroupMatch.id == GroupPrediction.group_match_id)
+        .where(GroupPrediction.user_id == user_id)
+    )
+    rows = await session.execute(stmt)
+    return {r[0]: (r[1], r[2]) for r in rows}
 
 
 async def get_actual_results(session: AsyncSession) -> dict[int, tuple[int, int]]:

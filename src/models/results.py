@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import datetime
 
-from sqlalchemy import DateTime, Integer, SmallInteger, func
+from sqlalchemy import Boolean, DateTime, Integer, SmallInteger, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.base import Base
@@ -23,6 +23,10 @@ class ActualResult(Base):
     match_number: Mapped[int] = mapped_column(Integer, primary_key=True)  # 1..72 (v1)
     home_score: Mapped[int] = mapped_column(SmallInteger)
     away_score: Mapped[int] = mapped_column(SmallInteger)
+    # Разослана ли утренняя сводка по этому матчу пользователям.
+    digested: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false")
+    )
     updated_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
