@@ -31,9 +31,10 @@ class Settings(BaseSettings):
     groq_api_key: str = Field(default="", alias="GROQ_API_KEY")
     groq_model: str = Field(default="llama-3.3-70b-versatile", alias="GROQ_MODEL")
     tavily_api_key: str = Field(default="", alias="TAVILY_API_KEY")
-    # Час суток (0–23): вечерний автопоиск+автозапись результатов и утренняя рассылка сводок.
-    results_fetch_hour: int = Field(default=23, alias="RESULTS_FETCH_HOUR")
-    digest_hour: int = Field(default=9, alias="DIGEST_HOUR")
+    # Часы (0–23) в зоне schedule_tz: срез результатов и рассылка сводок.
+    results_fetch_hour: int = Field(default=6, alias="RESULTS_FETCH_HOUR")
+    digest_hour: int = Field(default=14, alias="DIGEST_HOUR")
+    schedule_tz: str = Field(default="Europe/Berlin", alias="SCHEDULE_TZ")
     # Мастер-переключатель авто-режима (ночная авто-запись из веба + утренняя рассылка).
     # По умолчанию ВЫКЛ: веб-поиск результатов оказался ненадёжным. Ручной ввод /results
     # и команды /score, /top работают независимо от этого флага.

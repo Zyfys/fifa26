@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import datetime
 import logging
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramAPIError
@@ -224,7 +225,11 @@ async def on_manual_text(
 # --- Дневные фоновые задачи ---
 
 def _seconds_until_hour(hour: int) -> float:
-    now = datetime.datetime.now()
+    """Секунд до ближайшего наступления `hour:00` в зоне settings.schedule_tz."""
+    try:
+        now = datetime.datetime.now(ZoneInfo(settings.schedule_tz))
+    except ZoneInfoNotFoundError:
+        now = datetime.datetime.now()
     target = now.replace(hour=hour % 24, minute=0, second=0, microsecond=0)
     if target <= now:
         target += datetime.timedelta(days=1)
