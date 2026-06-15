@@ -1,24 +1,28 @@
-"""Оркестрация автопоиска результатов: Tavily → Groq → сопоставление с расписанием.
+"""Оркестрация авто-получения результатов: football-data.org → маппинг названий →
+сопоставление с расписанием бота.
 
-Возвращает кандидатов (привязанные + непривязанные) для подтверждения админом.
-Ничего не сохраняет в БД — запись делает только хэндлер после ✅ админа.
+Возвращает кандидатов (привязанные + непривязанные). Запись в БД — в auto_ingest.
 """
 
 from __future__ import annotations
 
-import datetime
+import logging
 from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
+from src.data.teams_en import ru_name
 from src.db import repo
-from src.services import groq_client, tavily_client
+from src.services import football_api
 from src.services.result_matching import (
     MatchedResult,
+    ParsedResult,
     UnmatchedResult,
     match_results_to_fixtures,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -28,31 +32,39 @@ class IngestResult:
     note: str | None = None  # пояснение, если кандидатов нет
 
 
-async def fetch_candidates(
-    session: AsyncSession, *, day: datetime.date | None = None
-) -> IngestResult:
-    if not (settings.groq_enabled and settings.tavily_enabled):
-        return IngestResult(note="нет ключей Tavily/Groq — используй ручной ввод")
+async def fetch_candidates(session: AsyncSession) -> IngestResult:
+    if not settings.football_data_token:
+        return IngestResult(note="нет FOOTBALL_DATA_TOKEN — используй ручной ввод")
 
-    day = day or datetime.date.today()
     fixtures_all = await repo.list_group_fixtures(session)
     filled = await repo.get_actual_results(session)
-    unfilled = [(n, h, a) for (n, h, a) in fixtures_all if n not in filled]
-    if not unfilled:
-        return IngestResult(note="все групповые матчи уже внесены")
 
-    text = await tavily_client.search_results(day, api_key=settings.tavily_api_key)
-    if not text.strip():
-        return IngestResult(note="Tavily ничего не вернул — попробуй позже или вручную")
+    raw = await football_api.fetch_finished_results(token=settings.football_data_token)
+    if not raw:
+        return IngestResult(note="API не вернул сыгранных матчей — попробуй позже или вручную")
 
-    parsed = await groq_client.extract_results(
-        text, unfilled, api_key=settings.groq_api_key, model=settings.groq_model
-    )
+    # Английские названия источника → русские из расписания. Несопоставимые имена пропускаем.
+    parsed: list[ParsedResult] = []
+    unknown: set[str] = set()
+    for home_en, away_en, hs, as_ in raw:
+        rh, ra = ru_name(home_en), ru_name(away_en)
+        if rh is None:
+            unknown.add(home_en)
+        if ra is None:
+            unknown.add(away_en)
+        if rh and ra:
+            parsed.append(ParsedResult(rh, ra, hs, as_))
+    if unknown:
+        logger.info(
+            "football-data: не сопоставлены названия (добавь в teams_en): %s",
+            ", ".join(sorted(unknown)),
+        )
+
     matched, unmatched = match_results_to_fixtures(parsed, fixtures_all)
     # Не перезаписываем уже внесённые результаты автоматически.
     matched = [m for m in matched if m.match_number not in filled]
     if not matched and not unmatched:
-        return IngestResult(note="не нашёл сыгранных матчей из числа незаполненных")
+        return IngestResult(note="нет новых сыгранных матчей из расписания бота")
     return IngestResult(matched=matched, unmatched=unmatched)
 
 
