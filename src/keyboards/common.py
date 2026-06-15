@@ -60,12 +60,25 @@ def my_forecast_menu_keyboard() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def results_entry_keyboard(*, with_fetch: bool) -> InlineKeyboardMarkup:
-    """Админ: ручной ввод реальных результатов (поиск с автозаписью / по матчам)."""
+def results_entry_keyboard(
+    *, with_fetch: bool, with_reset: bool = False
+) -> InlineKeyboardMarkup:
+    """Админ: ручной ввод реальных результатов (поиск с автозаписью / по матчам / сброс)."""
     builder = InlineKeyboardBuilder()
     if with_fetch:
         builder.button(text="🌐 Найти и записать сейчас", callback_data="res:fetch")
     builder.button(text="🔢 По матчам", callback_data="res:manual")
+    if with_reset:
+        builder.button(text="🗑 Сбросить все результаты", callback_data="res:reset")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def results_reset_confirm_keyboard() -> InlineKeyboardMarkup:
+    """Админ: подтверждение удаления всех реальных результатов."""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🗑 Да, удалить все", callback_data="res:reset_yes")
+    builder.button(text="Отмена", callback_data="res:reset_no")
     builder.adjust(1)
     return builder.as_markup()
 

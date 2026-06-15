@@ -112,3 +112,16 @@ async def test_users_with_predictions(session: AsyncSession):
     await session.commit()
     users = await repo.get_users_with_group_predictions(session)
     assert [u.id for u in users] == [u1.id]
+
+
+async def test_clear_actual_results(session: AsyncSession):
+    await _setup_group(session)
+    await repo.upsert_actual_result(session, 1, 1, 0)
+    await repo.upsert_actual_result(session, 2, 2, 2)
+    await session.commit()
+    assert await repo.count_actual_results(session) == 2
+
+    deleted = await repo.clear_actual_results(session)
+    await session.commit()
+    assert deleted == 2
+    assert await repo.count_actual_results(session) == 0

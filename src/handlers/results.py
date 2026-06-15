@@ -26,7 +26,11 @@ from src.db import repo
 from src.db.session import async_session
 from src.handlers.callbacks import accessible_message
 from src.handlers.states import Results
-from src.keyboards.common import results_entry_keyboard, score_keyboard
+from src.keyboards.common import (
+    results_entry_keyboard,
+    results_reset_confirm_keyboard,
+    score_keyboard,
+)
 from src.services.digest import send_daily_digests
 from src.services.results_ingest import IngestResult, auto_ingest
 from src.services.scores import parse_score, score_error_message
@@ -50,7 +54,8 @@ async def cmd_results(message: Message, session: AsyncSession) -> None:
         f"🧮 <b>Реальные результаты</b>\n\nВнесено: <b>{done}/{GROUP_TOTAL}</b>\n\n"
         "Внеси счёт вручную:",
         reply_markup=results_entry_keyboard(
-            with_fetch=settings.autofetch_enabled and settings.results_auto
+            with_fetch=settings.autofetch_enabled and settings.results_auto,
+            with_reset=done > 0,
         ),
     )
 
@@ -82,6 +87,47 @@ async def on_res_fetch(call: CallbackQuery, session: AsyncSession) -> None:
     await call.answer("Ищу и записываю…")
     ingest = await auto_ingest(session)
     await msg.answer(_render_ingest_report(ingest))
+
+
+# --- Сброс всех результатов ---
+
+@router.callback_query(F.data == "res:reset")
+async def on_res_reset(call: CallbackQuery, session: AsyncSession) -> None:
+    if not _is_admin(call.from_user):
+        await call.answer()
+        return
+    msg = await accessible_message(call)
+    if msg is None:
+        return
+    done = await repo.count_actual_results(session)
+    await call.answer()
+    await msg.answer(
+        f"⚠️ Удалить все внесённые результаты ({done})? Это сбросит точность и рейтинг.",
+        reply_markup=results_reset_confirm_keyboard(),
+    )
+
+
+@router.callback_query(F.data == "res:reset_yes")
+async def on_res_reset_yes(call: CallbackQuery, session: AsyncSession) -> None:
+    if not _is_admin(call.from_user):
+        await call.answer()
+        return
+    msg = await accessible_message(call)
+    if msg is None:
+        return
+    deleted = await repo.clear_actual_results(session)
+    await session.commit()
+    await call.answer("Сброшено")
+    await msg.edit_text(f"🗑 Удалено результатов: {deleted}. Внесено 0/{GROUP_TOTAL}.")
+
+
+@router.callback_query(F.data == "res:reset_no")
+async def on_res_reset_no(call: CallbackQuery) -> None:
+    msg = await accessible_message(call)
+    if msg is None:
+        return
+    await call.answer()
+    await msg.edit_text("Отменено — результаты целы.")
 
 
 # --- Ручной ввод/исправление по матчам ---

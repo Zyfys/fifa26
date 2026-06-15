@@ -529,6 +529,12 @@ async def get_user_pred_by_match(
     return {r[0]: (r[1], r[2]) for r in rows}
 
 
+async def clear_actual_results(session: AsyncSession) -> int:
+    """Удалить все реальные результаты. Возвращает число удалённых строк."""
+    result = await session.execute(delete(ActualResult))
+    return result.rowcount or 0
+
+
 async def get_actual_results(session: AsyncSession) -> dict[int, tuple[int, int]]:
     """match_number → (счёт хозяев, счёт гостей) по всем внесённым результатам."""
     rows = await session.execute(
