@@ -61,8 +61,13 @@ async def fetch_candidates(session: AsyncSession) -> IngestResult:
         )
 
     matched, unmatched = match_results_to_fixtures(parsed, fixtures_all)
-    # Не перезаписываем уже внесённые результаты автоматически.
-    matched = [m for m in matched if m.match_number not in filled]
+    # Берём новые и изменившиеся (корректировки счёта от источника), пропускаем
+    # уже совпадающие — чтобы не сбрасывать digested и не слать повторную сводку.
+    matched = [
+        m
+        for m in matched
+        if filled.get(m.match_number) != (m.home_score, m.away_score)
+    ]
     if not matched and not unmatched:
         return IngestResult(note="нет новых сыгранных матчей из расписания бота")
     return IngestResult(matched=matched, unmatched=unmatched)
