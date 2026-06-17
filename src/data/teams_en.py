@@ -47,6 +47,7 @@ _RU_BY_EN_RAW: dict[str, str] = {
     "Spain": "Испания",
     "Cape Verde": "Кабо-Верде",
     "Cabo Verde": "Кабо-Верде",
+    "Cape Verde Islands": "Кабо-Верде",
     "Saudi Arabia": "Саудовская Аравия",
     "Uruguay": "Уругвай",
     "France": "Франция",

@@ -12,6 +12,7 @@ def test_ru_name_mapping():
     assert ru_name("USA") == "США"
     assert ru_name("Korea Republic") == "Южная Корея"
     assert ru_name("Türkiye") == "Турция"
+    assert ru_name("Cape Verde Islands") == "Кабо-Верде"
     assert ru_name("  czech republic ") == "Чехия"  # регистр/пробелы не важны
     assert ru_name("Atlantis") is None
 

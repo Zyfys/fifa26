@@ -15,7 +15,6 @@ import logging
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from aiogram import Bot, F, Router
-from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, User
@@ -237,36 +236,35 @@ def _seconds_until_hour(hour: int) -> float:
 
 
 async def ingest_loop(bot: Bot) -> None:
-    """Вечером: автопоиск результатов и автозапись. Шлёт админу краткий отчёт."""
+    """Срез результатов: тихо подтягивает и записывает из API (без сообщений админу)."""
     if not (settings.autofetch_enabled and settings.results_auto):
         logger.info("Авто-запись результатов выключена (RESULTS_AUTO=false или нет ключей).")
         return
-    admin_id = sorted(settings.admin_id_set)[0]
     while True:
         await asyncio.sleep(_seconds_until_hour(settings.results_fetch_hour))
         try:
             async with async_session() as session:
                 ingest = await auto_ingest(session)
-            if ingest.matched or ingest.unmatched:
-                try:
-                    await bot.send_message(admin_id, _render_ingest_report(ingest))
-                except TelegramAPIError:
-                    logger.warning("Не доставил отчёт автозаписи админу")
+            if ingest.matched:
+                logger.info("Срез результатов: записано/обновлено %s", len(ingest.matched))
         except Exception:  # noqa: BLE001 — цикл не должен падать
-            logger.exception("Автозапись результатов: ошибка цикла")
+            logger.exception("Срез результатов: ошибка цикла")
 
 
 async def digest_loop(bot: Bot) -> None:
-    """Утром: рассылка каждому игроку его сводки по новым результатам."""
+    """Рассылка игрокам сводки. Перед отправкой до-подтягивает свежие результаты,
+    чтобы поймать поздно доигранные матчи и сводка была полной."""
     if not settings.results_auto:
-        logger.info("Утренняя рассылка выключена (RESULTS_AUTO=false).")
+        logger.info("Рассылка сводок выключена (RESULTS_AUTO=false).")
         return
     while True:
         await asyncio.sleep(_seconds_until_hour(settings.digest_hour))
         try:
             async with async_session() as session:
+                if settings.autofetch_enabled:
+                    await auto_ingest(session)  # добрать поздние матчи к моменту рассылки
                 sent = await send_daily_digests(bot, session)
             if sent:
-                logger.info("Утренняя сводка отправлена: %s игрокам", sent)
+                logger.info("Сводка отправлена: %s игрокам", sent)
         except Exception:  # noqa: BLE001 — цикл не должен падать
             logger.exception("Утренняя сводка: ошибка цикла")
