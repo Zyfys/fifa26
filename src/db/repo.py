@@ -548,9 +548,25 @@ async def get_actual_results(session: AsyncSession) -> dict[int, tuple[int, int]
 
 
 async def count_actual_results(session: AsyncSession) -> int:
+    """Сколько внесено реальных результатов группового этапа (матчи 1..72)."""
     return await session.scalar(
-        select(func.count()).select_from(ActualResult)
+        select(func.count())
+        .select_from(ActualResult)
+        .where(ActualResult.match_number <= GROUP_MATCHES_TOTAL)
     ) or 0
+
+
+async def get_undigested_playoff_results(session: AsyncSession) -> list[int]:
+    """Номера сыгранных матчей плей-офф (>=73) без разосланной сводки сетки."""
+    rows = await session.scalars(
+        select(ActualResult.match_number)
+        .where(
+            ActualResult.match_number > GROUP_MATCHES_TOTAL,
+            ActualResult.digested.is_(False),
+        )
+        .order_by(ActualResult.match_number)
+    )
+    return list(rows)
 
 
 async def get_unfilled_group_matches(session: AsyncSession) -> list[GroupMatch]:

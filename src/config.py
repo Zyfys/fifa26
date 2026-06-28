@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     tavily_api_key: str = Field(default="", alias="TAVILY_API_KEY")
     # Часы (0–23) в зоне schedule_tz: срез результатов и рассылка сводок.
     results_fetch_hour: int = Field(default=6, alias="RESULTS_FETCH_HOUR")
-    digest_hour: int = Field(default=14, alias="DIGEST_HOUR")
+    digest_hour: int = Field(default=11, alias="DIGEST_HOUR")
     schedule_tz: str = Field(default="Europe/Berlin", alias="SCHEDULE_TZ")
     # Мастер-переключатель авто-режима (ночная авто-запись из веба + утренняя рассылка).
     # По умолчанию ВЫКЛ: веб-поиск результатов оказался ненадёжным. Ручной ввод /results

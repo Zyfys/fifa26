@@ -32,6 +32,7 @@ from src.keyboards.common import (
     score_keyboard,
 )
 from src.services.digest import send_daily_digests
+from src.services.playoff_digest import send_playoff_digests
 from src.services.results_ingest import IngestResult, auto_ingest
 from src.services.scores import parse_score, score_error_message
 
@@ -253,7 +254,10 @@ async def ingest_loop(bot: Bot) -> None:
 
 async def digest_loop(bot: Bot) -> None:
     """Рассылка игрокам сводки. Перед отправкой до-подтягивает свежие результаты,
-    чтобы поймать поздно доигранные матчи и сводка была полной."""
+    чтобы поймать поздно доигранные матчи и сводка была полной.
+
+    Кроме групповой сводки счетов, после каждой полностью сыгранной стадии
+    плей-офф рассылает обновление сетки (сравнение с прогнозом игрока)."""
     if not settings.results_auto:
         logger.info("Рассылка сводок выключена (RESULTS_AUTO=false).")
         return
@@ -264,7 +268,10 @@ async def digest_loop(bot: Bot) -> None:
                 if settings.autofetch_enabled:
                     await auto_ingest(session)  # добрать поздние матчи к моменту рассылки
                 sent = await send_daily_digests(bot, session)
+                bracket_sent = await send_playoff_digests(bot, session)
             if sent:
                 logger.info("Сводка отправлена: %s игрокам", sent)
+            if bracket_sent:
+                logger.info("Сводка сетки плей-офф отправлена: %s сообщений", bracket_sent)
         except Exception:  # noqa: BLE001 — цикл не должен падать
             logger.exception("Утренняя сводка: ошибка цикла")
