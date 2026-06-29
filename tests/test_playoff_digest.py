@@ -1,4 +1,4 @@
-"""Тесты авто-сводки плей-офф: инкрементальный рендер и группировка новых матчей."""
+"""Тесты авто-сводки плей-офф: засчёт прохода в раунд по всей сетке (не по слоту)."""
 
 from __future__ import annotations
 
@@ -7,65 +7,65 @@ from types import SimpleNamespace
 from src.services.playoff_actual import ActualMatch
 from src.services.playoff_digest import (
     _completed_stages,
-    _new_by_stage,
+    _new_decided,
+    _user_reach,
     build_playoff_update,
 )
 
 
-def _pred(home, away, winner):
+def _pred(home=None, away=None, winner=None):
     return SimpleNamespace(home_team_id=home, away_team_id=away, winner_team_id=winner)
 
 
-# id команд: 1 Бразилия, 2 Япония, 3 Франция, 4 Германия
-TMAP = {1: "Бразилия", 2: "Япония", 3: "Франция", 4: "Германия"}
+# id: 1 Бразилия, 2 Япония, 3 Франция, 5 Канада
+TMAP = {1: "Бразилия", 2: "Япония", 3: "Франция", 5: "Канада"}
 
 
-def test_build_update_guessed_and_instead():
-    actual = {
-        73: ActualMatch(73, "R32", home_id=1, away_id=2, winner_id=1),  # прошла Бразилия
-        74: ActualMatch(74, "R32", home_id=3, away_id=4, winner_id=3),  # прошла Франция
-    }
-    preds = {
-        73: _pred(1, 2, 1),  # угадал Бразилию ✅
-        74: _pred(3, 4, 4),  # ждал Германию — прошла Франция 🔄
-    }
-    text = build_playoff_update({"R32": [73, 74]}, actual, preds, TMAP, completed=set())
-
-    assert "обновление сетки" in text
-    assert "Бразилия прошёл дальше — угадал!" in text
-    assert "прошёл" in text and "Франция" in text and "ты ждал" in text and "Германия" in text
-    assert "угадал прошедших: <b>1/2</b>" in text
+def test_user_reach_counts_team_from_any_slot():
+    # Канаду (5) игрок ведёт в R16 в матче 91 как гостя — слот не важен.
+    preds = {91: _pred(home=2, away=5)}
+    reach_r16 = _user_reach(preds, "R32")  # победитель R32 выходит в 1/8 (R16)
+    assert 5 in reach_r16  # Канада засчитана, хотя в другом слоте
 
 
-def test_build_update_marks_completed_stage():
-    actual = {103: ActualMatch(103, "THIRD", home_id=1, away_id=2, winner_id=2)}
-    preds = {103: _pred(1, 2, 2)}
-    text = build_playoff_update({"THIRD": [103]}, actual, preds, TMAP, completed={"THIRD"})
-    assert "🏁" in text  # стадия сыграна полностью
+def test_user_reach_champion_from_final_winner():
+    preds = {104: _pred(home=1, away=3, winner=1)}
+    assert _user_reach(preds, "FINAL") == {1}  # чемпион = победитель матча 104
 
 
-def _decided(num, stage):
-    return ActualMatch(num, stage, home_id=1, away_id=2, winner_id=1)
+def test_build_update_credits_advance_from_any_slot():
+    # Реально Канада (5) прошла в 1/8 из матча 73; игрок вёл её в 1/8 в другом слоте.
+    actual = {73: ActualMatch(73, "R32", home_id=8, away_id=5, winner_id=5)}
+    preds = {91: _pred(home=2, away=5)}  # Канада в его R16 (матч 91)
+    text = build_playoff_update([73], actual, preds, TMAP, completed=set())
+    assert "Канада → <b>1/8 финала</b> — ✅ угадал!" in text
+    assert "Угадал проходов: <b>1/1</b>" in text
+
+
+def test_build_update_not_guessed_when_team_absent_deeper():
+    # Канада прошла в 1/8, но игрок не вёл её дальше группового этапа.
+    actual = {73: ActualMatch(73, "R32", home_id=8, away_id=5, winner_id=5)}
+    preds = {}  # в R16 у игрока Канады нет
+    text = build_playoff_update([73], actual, preds, TMAP, completed=set())
+    assert "❌ у тебя дальше не проходила" in text
+    assert "Угадал проходов: <b>0/1</b>" in text
+
+
+def _decided(num, stage, winner=1):
+    return ActualMatch(num, stage, home_id=1, away_id=2, winner_id=winner)
 
 
 def _undecided(num, stage):
     return ActualMatch(num, stage, home_id=1, away_id=2)
 
 
-def test_new_by_stage_groups_only_decided_new():
-    actual = {
-        73: _decided(73, "R32"),
-        74: _undecided(74, "R32"),  # не сыгран — игнор
-        89: _decided(89, "R16"),
-    }
-    # 74 в undigested не попадёт (он не decided); проверяем группировку 73 и 89.
-    grouped = _new_by_stage(actual, undigested={73, 74, 89})
-    assert grouped == {"R32": [73], "R16": [89]}
+def test_new_decided_only_decided_matches():
+    actual = {73: _decided(73, "R32"), 74: _undecided(74, "R32"), 89: _decided(89, "R16")}
+    assert _new_decided(actual, undigested={73, 74, 89}) == [73, 89]
 
 
-def test_completed_stages_partial_not_complete():
-    # R32: только один матч сыгран — стадия не завершена.
+def test_completed_stage_partial_not_complete():
     actual = {73: _decided(73, "R32")}
     for n in range(74, 89):
         actual[n] = _undecided(n, "R32")
-    assert _completed_stages(actual, ["R32"]) == set()
+    assert _completed_stages(actual, {"R32"}) == set()

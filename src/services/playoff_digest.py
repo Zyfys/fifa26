@@ -2,9 +2,10 @@
 по СВЕЖИМ сыгранным матчам — инкрементально, не дожидаясь конца стадии.
 
 Что показываем по каждому новому матчу:
-  • кто реально прошёл дальше (✅ если игрок угадал прошедшего);
-  • кто прошёл ВМЕСТО того, на кого ставил игрок (🔄);
-  • счётчик угаданных прошедших по новым матчам; пометка 🏁 — стадия завершена.
+  • какая команда в какой раунд вышла (напр. «Канада → 1/8 финала»);
+  • ✅ если игрок ВЁЛ эту команду в этот раунд по своей сетке — с ЛЮБОГО места
+    (сравнение по факту попадания в раунд, не по конкретному слоту), иначе ❌;
+  • счётчик угаданных проходов; пометка 🏁 — стадия завершена полностью.
 
 Журнал «уже разослано» — флаг digested у ActualResult (матчи 73..104), как и в
 групповой сводке. Реальная сетка пересчитывается из API при каждом запуске.
@@ -36,6 +37,18 @@ STAGE_MATCHES: dict[str, list[int]] = {}
 for _stage, _num, _h, _a in BRACKET:
     STAGE_MATCHES.setdefault(_stage, []).append(_num)
 
+# Стадия выигранного матча -> раунд, в который выходит его победитель (для текста).
+_REACHED_LABEL: dict[str, str] = {
+    "R32": "1/8 финала",
+    "R16": "1/4 финала",
+    "QF": "1/2 финала",
+    "SF": "финал",
+    "FINAL": "🏆 чемпион",
+    "THIRD": "🥉 3-е место",
+}
+# Стадия -> следующая стадия: по её участникам судим «команда дошла до раунда».
+_NEXT_STAGE: dict[str, str] = {"R32": "R16", "R16": "QF", "QF": "SF", "SF": "FINAL"}
+
 
 def _lbl(tmap: dict[int, str], tid: int | None) -> str:
     if tid is None:
@@ -44,57 +57,65 @@ def _lbl(tmap: dict[int, str], tid: int | None) -> str:
     return f"{team_flag(name)} {name}"
 
 
+def _user_reach(user_preds: dict, stage: str) -> set[int]:
+    """Команды, которые игрок предсказал в раунд, куда выходит победитель `stage`.
+
+    Сравнение по факту попадания команды в раунд (с ЛЮБОГО места сетки), а не по
+    конкретному слоту: если игрок довёл команду до этого раунда где угодно — засчитано.
+    """
+    nxt = _NEXT_STAGE.get(stage)
+    if nxt is not None:  # участники матчей следующей стадии в прогнозе игрока
+        return {
+            t
+            for num in STAGE_MATCHES[nxt]
+            if (p := user_preds.get(num)) is not None
+            for t in (p.home_team_id, p.away_team_id)
+            if t is not None
+        }
+    # Финал -> чемпион, матч за 3-е -> бронза: победитель соответствующего матча.
+    src = 104 if stage == "FINAL" else 103
+    p = user_preds.get(src)
+    return {p.winner_team_id} if p and p.winner_team_id is not None else set()
+
+
 def build_playoff_update(
-    new_by_stage: dict[str, list[int]],
+    new_nums: list[int],
     actual: dict[int, ActualMatch],
     user_preds: dict,
     tmap: dict[int, str],
     completed: set[str],
 ) -> str:
-    """Текст сводки по свежим сыгранным матчам плей-офф (инкрементально) для игрока.
-
-    new_by_stage — новые (ещё не разосланные) сыгранные матчи по стадиям;
-    completed — стадии, сыгранные теперь полностью (для пометки 🏁).
-    """
+    """Сводка по свежим матчам плей-офф: какая команда в какой раунд вышла и угадал
+    ли это игрок — по всей сетке, с любого места (не по конкретному слоту)."""
     lines = [
-        "⚽️ <b>Плей-офф — обновление сетки!</b>",
-        "Свежие результаты против твоего прогноза.",
+        "⚽️ <b>Плей-офф — кто прошёл дальше!</b>",
+        "Засчитываю, если ты вёл команду в этот раунд с любого места сетки.",
         "",
     ]
-    correct = total = 0
-    for stage in bracket.STAGE_ORDER:
-        nums = new_by_stage.get(stage)
-        if not nums:
-            continue
-        suffix = " — сыграна полностью! 🏁" if stage in completed else ""
-        lines.append(f"<b>{bracket.STAGE_NAMES.get(stage, stage)}{suffix}</b>")
-        for num in nums:
-            am = actual[num]
-            pred = user_preds.get(num)
-            u_win = pred.winner_team_id if pred else None
-            total += 1
-            if u_win is not None and u_win == am.winner_id:
-                correct += 1
-                lines.append(f"✅ {_lbl(tmap, am.winner_id)} прошёл дальше — угадал!")
-            else:
-                lines.append(f"🔄 прошёл {_lbl(tmap, am.winner_id)} — ты ждал {_lbl(tmap, u_win)}")
-        lines.append("")
+    correct = 0
+    for num in new_nums:
+        am = actual[num]
+        label = _REACHED_LABEL.get(am.stage, am.stage)
+        guessed = am.winner_id in _user_reach(user_preds, am.stage)
+        correct += guessed
+        mark = "✅ угадал!" if guessed else "❌ у тебя дальше не проходила"
+        lines.append(f"{_lbl(tmap, am.winner_id)} → <b>{label}</b> — {mark}")
 
-    lines.append(f"📊 По новым матчам угадал прошедших: <b>{correct}/{total}</b>")
+    lines += ["", f"📊 Угадал проходов: <b>{correct}/{len(new_nums)}</b>"]
+    if completed:
+        done = ", ".join(
+            bracket.STAGE_NAMES.get(s, s) for s in bracket.STAGE_ORDER if s in completed
+        )
+        lines += ["", f"🏁 Стадия сыграна полностью: {done}"]
     return "\n".join(lines)
 
 
-def _new_by_stage(actual: dict[int, ActualMatch], undigested: set[int]) -> dict[str, list[int]]:
-    """Новые сыгранные матчи плей-офф, сгруппированные по стадии (в порядке сетки)."""
-    out: dict[str, list[int]] = {}
-    for num in sorted(undigested):
-        am = actual.get(num)
-        if am and am.decided:
-            out.setdefault(am.stage, []).append(num)
-    return out
+def _new_decided(actual: dict[int, ActualMatch], undigested: set[int]) -> list[int]:
+    """Новые (неразосланные) и уже сыгранные матчи плей-офф — по номеру."""
+    return sorted(n for n in undigested if (am := actual.get(n)) and am.decided)
 
 
-def _completed_stages(actual: dict[int, ActualMatch], stages: list[str]) -> set[str]:
+def _completed_stages(actual: dict[int, ActualMatch], stages: set[str]) -> set[str]:
     """Из заданных стадий — те, что теперь сыграны полностью."""
     return {
         st for st in stages if all(actual.get(n) and actual[n].decided for n in STAGE_MATCHES[st])
@@ -126,18 +147,17 @@ async def send_playoff_digests(bot: Bot, session: AsyncSession) -> int:
         await session.commit()
 
     undigested = set(await repo.get_undigested_playoff_results(session))
-    new_by_stage = _new_by_stage(actual, undigested)
-    if not new_by_stage:
+    new_nums = _new_decided(actual, undigested)
+    if not new_nums:
         return 0
-    completed = _completed_stages(actual, list(new_by_stage))
-    new_nums = [num for nums in new_by_stage.values() for num in nums]
+    completed = _completed_stages(actual, {actual[n].stage for n in new_nums})
 
     tmap = await repo.get_teams_map(session)
     users = await repo.get_users_with_group_predictions(session)
     sent = 0
     for user in users:
         preds = await repo.get_bracket_preds(session, user.id)
-        text = build_playoff_update(new_by_stage, actual, preds, tmap, completed)
+        text = build_playoff_update(new_nums, actual, preds, tmap, completed)
         try:
             await bot.send_message(user.telegram_id, text)
             sent += 1
