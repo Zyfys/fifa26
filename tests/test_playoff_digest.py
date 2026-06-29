@@ -9,13 +9,20 @@ from src.services.playoff_digest import (
     _completed_stages,
     _new_decided,
     _user_depth_label,
+    _user_pick_label,
     _user_reach,
     build_playoff_update,
 )
 
 
-def _pred(home=None, away=None, winner=None):
-    return SimpleNamespace(home_team_id=home, away_team_id=away, winner_team_id=winner)
+def _pred(home=None, away=None, winner=None, hs=None, as_=None):
+    return SimpleNamespace(
+        home_team_id=home,
+        away_team_id=away,
+        winner_team_id=winner,
+        home_score=hs,
+        away_score=as_,
+    )
 
 
 # id: 1 Бразилия, 2 Япония, 3 Франция, 5 Канада
@@ -44,13 +51,25 @@ def test_user_depth_label_shows_how_far_user_took_team():
     assert _user_depth_label({}, 5) == "у тебя она не выходила из группы"
 
 
+def test_user_pick_label_shows_user_bet_on_that_match():
+    # Прогноз игрока на матч 73: Япония 2:1 Франция, проходит Франция (флаги добавит _lbl).
+    preds = {73: _pred(home=2, away=3, winner=3, hs=2, as_=1)}
+    label = _user_pick_label(preds, 73, TMAP)
+    assert "ты ставил:" in label and "Япония" in label and "2:1" in label
+    assert "→ прошёл" in label and "Франция" in label
+    # Нет прогноза на матч.
+    assert _user_pick_label({}, 73, TMAP) == "🎟 ты не делал прогноз на этот матч"
+
+
 def test_build_update_credits_advance_from_any_slot_with_prediction():
     # Реально Канада (5) прошла в 1/8 из матча 73; игрок вёл её в 1/8 в другом слоте.
     actual = {73: ActualMatch(73, "R32", home_id=8, away_id=5, winner_id=5)}
-    preds = {91: _pred(home=2, away=5)}  # Канада в его R16 (матч 91)
+    # В слоте 73 игрок ставил Японию (2) над Францией (3); Канаду (5) ведёт в R16 (матч 91).
+    preds = {73: _pred(home=2, away=3, winner=2, hs=1, as_=0), 91: _pred(home=2, away=5)}
     text = build_playoff_update([73], actual, preds, TMAP, completed=set())
     assert "Канада → <b>1/8 финала</b>" in text
     assert "✅ угадал! (ты вёл её до 1/8 финала)" in text
+    assert "ты ставил:" in text and "Япония" in text and "1:0" in text
     assert "Угадал проходов: <b>1/1</b>" in text
 
 
@@ -60,6 +79,7 @@ def test_build_update_not_guessed_shows_user_prediction():
     preds = {}  # в плей-офф у игрока Канады нет
     text = build_playoff_update([73], actual, preds, TMAP, completed=set())
     assert "❌ у тебя она не выходила из группы" in text
+    assert "🎟 ты не делал прогноз на этот матч" in text
     assert "Угадал проходов: <b>0/1</b>" in text
 
 

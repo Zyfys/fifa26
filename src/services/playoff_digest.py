@@ -106,6 +106,24 @@ def _user_depth_label(user_preds: dict, team_id: int) -> str:
     return "у тебя она не выходила из группы"
 
 
+def _user_pick_label(user_preds: dict, num: int, tmap: dict[int, str]) -> str:
+    """Прогноз игрока на этот же матч сетки (пара, счёт, кто проходит) — «что ставил»."""
+    p = user_preds.get(num)
+    if p is None or p.home_team_id is None or p.away_team_id is None:
+        return "🎟 ты не делал прогноз на этот матч"
+    home, away, win = (
+        _lbl(tmap, p.home_team_id),
+        _lbl(tmap, p.away_team_id),
+        _lbl(tmap, p.winner_team_id),
+    )
+    score = (
+        f" {p.home_score}:{p.away_score}"
+        if p.home_score is not None and p.away_score is not None
+        else " —"
+    )
+    return f"🎟 ты ставил: {home}{score} {away} → прошёл {win}"
+
+
 def build_playoff_update(
     new_nums: list[int],
     actual: dict[int, ActualMatch],
@@ -130,6 +148,7 @@ def build_playoff_update(
         verdict = f"✅ угадал! ({depth})" if guessed else f"❌ {depth}"
         lines.append(f"{_lbl(tmap, am.winner_id)} → <b>{label}</b>")
         lines.append(f"   {verdict}")
+        lines.append(f"   {_user_pick_label(user_preds, num, tmap)}")
         lines.append("")
 
     lines.append(f"📊 Угадал проходов: <b>{correct}/{len(new_nums)}</b>")
