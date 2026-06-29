@@ -51,25 +51,35 @@ def test_user_depth_label_shows_how_far_user_took_team():
     assert _user_depth_label({}, 5) == "у тебя она не выходила из группы"
 
 
-def test_user_pick_label_shows_user_bet_on_that_match():
-    # Прогноз игрока на матч 73: Япония 2:1 Франция, проходит Франция (флаги добавит _lbl).
-    preds = {73: _pred(home=2, away=3, winner=3, hs=2, as_=1)}
+def test_user_pick_label_decisive_score_no_winner_note():
+    # Решающий счёт — победитель ясен из счёта, «→» не нужен.
+    preds = {73: _pred(home=2, away=3, winner=2, hs=2, as_=1)}
     label = _user_pick_label(preds, 73, TMAP)
-    assert "ты ставил:" in label and "Япония" in label and "2:1" in label
-    assert "→ прошёл" in label and "Франция" in label
+    assert "Ты ставил:" in label and "Япония" in label and "2:1" in label and "Франция" in label
+    assert "→" not in label
     # Нет прогноза на матч.
-    assert _user_pick_label({}, 73, TMAP) == "🎟 ты не делал прогноз на этот матч"
+    assert _user_pick_label({}, 73, TMAP) == "🎟 Ты не делал прогноз на этот матч"
 
 
-def test_build_update_credits_advance_from_any_slot_with_prediction():
+def test_user_pick_label_draw_shows_who_advances():
+    # Ничья — нужно показать, кого игрок пускал дальше (пенальти).
+    preds = {73: _pred(home=2, away=3, winner=3, hs=1, as_=1)}
+    label = _user_pick_label(preds, 73, TMAP)
+    assert "1:1" in label and "→" in label and "Франция" in label
+
+
+def test_build_update_pick_then_fact_then_verdict():
     # Реально Канада (5) прошла в 1/8 из матча 73; игрок вёл её в 1/8 в другом слоте.
     actual = {73: ActualMatch(73, "R32", home_id=8, away_id=5, winner_id=5)}
-    # В слоте 73 игрок ставил Японию (2) над Францией (3); Канаду (5) ведёт в R16 (матч 91).
     preds = {73: _pred(home=2, away=3, winner=2, hs=1, as_=0), 91: _pred(home=2, away=5)}
     text = build_playoff_update([73], actual, preds, TMAP, completed=set())
-    assert "Канада → <b>1/8 финала</b>" in text
-    assert "✅ угадал! (ты вёл её до 1/8 финала)" in text
-    assert "ты ставил:" in text and "Япония" in text and "1:0" in text
+    # Порядок: ставка -> факт -> вердикт.
+    i_pick = text.index("Ты ставил:")
+    i_fact = text.index("По факту:")
+    i_verdict = text.index("✅ угадал!")
+    assert i_pick < i_fact < i_verdict
+    assert "Канада прошла в 1/8 финала" in text
+    assert "ты вёл её до 1/8 финала" in text
     assert "Угадал проходов: <b>1/1</b>" in text
 
 
@@ -79,7 +89,8 @@ def test_build_update_not_guessed_shows_user_prediction():
     preds = {}  # в плей-офф у игрока Канады нет
     text = build_playoff_update([73], actual, preds, TMAP, completed=set())
     assert "❌ у тебя она не выходила из группы" in text
-    assert "🎟 ты не делал прогноз на этот матч" in text
+    assert "🎟 Ты не делал прогноз на этот матч" in text
+    assert "По факту:" in text and "Канада прошла в 1/8 финала" in text
     assert "Угадал проходов: <b>0/1</b>" in text
 
 

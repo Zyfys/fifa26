@@ -1,10 +1,11 @@
 """Авто-сводка плей-офф: ежедневно (в 11:00) рассылает игрокам обновление сетки
 по СВЕЖИМ сыгранным матчам — инкрементально, не дожидаясь конца стадии.
 
-Что показываем по каждому новому матчу:
-  • какая команда в какой раунд вышла (напр. «Канада → 1/8 финала»);
-  • ✅ если игрок ВЁЛ эту команду в этот раунд по своей сетке — с ЛЮБОГО места
-    (сравнение по факту попадания в раунд, не по конкретному слоту), иначе ❌;
+Что показываем по каждому новому матчу (в этом порядке):
+  • 🎟 ставку игрока на этот матч сетки (пара и счёт);
+  • ➡️ факт: какая команда в какой раунд вышла (напр. «Канада прошла в 1/8»);
+  • ✅/❌ вердикт: ВЁЛ ли игрок эту команду в этот раунд по своей сетке — с ЛЮБОГО
+    места (сравнение по факту попадания в раунд, не по слоту), и докуда вёл;
   • счётчик угаданных проходов; пометка 🏁 — стадия завершена полностью.
 
 Журнал «уже разослано» — флаг digested у ActualResult (матчи 73..104), как и в
@@ -107,21 +108,17 @@ def _user_depth_label(user_preds: dict, team_id: int) -> str:
 
 
 def _user_pick_label(user_preds: dict, num: int, tmap: dict[int, str]) -> str:
-    """Прогноз игрока на этот же матч сетки (пара, счёт, кто проходит) — «что ставил»."""
+    """Ставка игрока на этот матч сетки: пара и счёт (для ничьей — кто проходит)."""
     p = user_preds.get(num)
     if p is None or p.home_team_id is None or p.away_team_id is None:
-        return "🎟 ты не делал прогноз на этот матч"
-    home, away, win = (
-        _lbl(tmap, p.home_team_id),
-        _lbl(tmap, p.away_team_id),
-        _lbl(tmap, p.winner_team_id),
-    )
-    score = (
-        f" {p.home_score}:{p.away_score}"
-        if p.home_score is not None and p.away_score is not None
-        else " —"
-    )
-    return f"🎟 ты ставил: {home}{score} {away} → прошёл {win}"
+        return "🎟 Ты не делал прогноз на этот матч"
+    home, away = _lbl(tmap, p.home_team_id), _lbl(tmap, p.away_team_id)
+    if p.home_score is not None and p.away_score is not None:
+        base = f"🎟 Ты ставил: {home} {p.home_score}:{p.away_score} {away}"
+        if p.home_score == p.away_score:  # ничья — уточняем проходящего (пенальти)
+            base += f" → {_lbl(tmap, p.winner_team_id)}"
+        return base
+    return f"🎟 Ты ставил: {home} — {away} → {_lbl(tmap, p.winner_team_id)}"
 
 
 def build_playoff_update(
@@ -142,13 +139,22 @@ def build_playoff_update(
     for num in new_nums:
         am = actual[num]
         label = _REACHED_LABEL.get(am.stage, am.stage)
+        winner = _lbl(tmap, am.winner_id)
         guessed = am.winner_id in _user_reach(user_preds, am.stage)
         correct += guessed
         depth = _user_depth_label(user_preds, am.winner_id)
+
+        if am.stage == "FINAL":
+            fact = f"➡️ По факту: {winner} — 🏆 чемпион!"
+        elif am.stage == "THIRD":
+            fact = f"➡️ По факту: {winner} — 🥉 3-е место"
+        else:
+            fact = f"➡️ По факту: {winner} прошла в {label}"
         verdict = f"✅ угадал! ({depth})" if guessed else f"❌ {depth}"
-        lines.append(f"{_lbl(tmap, am.winner_id)} → <b>{label}</b>")
-        lines.append(f"   {verdict}")
-        lines.append(f"   {_user_pick_label(user_preds, num, tmap)}")
+
+        lines.append(_user_pick_label(user_preds, num, tmap))  # 🎟 сначала ставка
+        lines.append(fact)  # ➡️ потом факт
+        lines.append(verdict)
         lines.append("")
 
     lines.append(f"📊 Угадал проходов: <b>{correct}/{len(new_nums)}</b>")
