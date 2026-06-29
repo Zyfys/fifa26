@@ -1,10 +1,10 @@
-"""Авто-сводка плей-офф: после полностью сыгранной стадии рассылает игрокам
-обновление сетки и сравнение с их прогнозом.
+"""Авто-сводка плей-офф: ежедневно (в 11:00) рассылает игрокам обновление сетки
+по СВЕЖИМ сыгранным матчам — инкрементально, не дожидаясь конца стадии.
 
-Что показываем по стадии:
+Что показываем по каждому новому матчу:
   • кто реально прошёл дальше (✅ если игрок угадал прошедшего);
-  • кто прошёл ВМЕСТО тех, на кого ставил игрок;
-  • счётчики: угаданных прошедших и совпавших пар стадии.
+  • кто прошёл ВМЕСТО того, на кого ставил игрок (🔄);
+  • счётчик угаданных прошедших по новым матчам; пометка 🏁 — стадия завершена.
 
 Журнал «уже разослано» — флаг digested у ActualResult (матчи 73..104), как и в
 групповой сводке. Реальная сетка пересчитывается из API при каждом запуске.
@@ -44,73 +44,67 @@ def _lbl(tmap: dict[int, str], tid: int | None) -> str:
     return f"{team_flag(name)} {name}"
 
 
-def build_stage_digest(
-    stage: str,
-    stage_nums: list[int],
+def build_playoff_update(
+    new_by_stage: dict[str, list[int]],
     actual: dict[int, ActualMatch],
     user_preds: dict,
     tmap: dict[int, str],
+    completed: set[str],
 ) -> str:
-    """Текст сводки по одной сыгранной стадии плей-офф для одного игрока."""
-    name = bracket.STAGE_NAMES.get(stage, stage)
-    advanced: list[str] = []  # угадал прошедшего
-    instead: list[str] = []  # прошёл не тот, кого ждал
-    correct = 0
-    pair_hits = 0
+    """Текст сводки по свежим сыгранным матчам плей-офф (инкрементально) для игрока.
 
-    for num in stage_nums:
-        am = actual[num]
-        pred = user_preds.get(num)
-        u_win = pred.winner_team_id if pred else None
-
-        if (
-            pred is not None
-            and None not in (am.home_id, am.away_id)
-            and {pred.home_team_id, pred.away_team_id} == {am.home_id, am.away_id}
-        ):
-            pair_hits += 1
-
-        if u_win is not None and u_win == am.winner_id:
-            correct += 1
-            advanced.append(f"✅ {_lbl(tmap, am.winner_id)}")
-        else:
-            instead.append(f"🔄 прошёл {_lbl(tmap, am.winner_id)} — ты ждал {_lbl(tmap, u_win)}")
-
-    n = len(stage_nums)
+    new_by_stage — новые (ещё не разосланные) сыгранные матчи по стадиям;
+    completed — стадии, сыгранные теперь полностью (для пометки 🏁).
+    """
     lines = [
-        f"⚽️ <b>{name} — сыграно!</b>",
-        "Сетка обновилась — сравниваю с твоим прогнозом.",
+        "⚽️ <b>Плей-офф — обновление сетки!</b>",
+        "Свежие результаты против твоего прогноза.",
         "",
-        "🟢 <b>Прошедших дальше угадал:</b>",
     ]
-    lines += advanced or ["— ни одного 😬"]
-    if instead:
-        lines += ["", "<b>Прошли вместо твоих:</b>", *instead]
-    lines += [
-        "",
-        f"📊 Угадал прошедших: <b>{correct}/{n}</b> · совпавших пар: <b>{pair_hits}/{n}</b>",
-    ]
+    correct = total = 0
+    for stage in bracket.STAGE_ORDER:
+        nums = new_by_stage.get(stage)
+        if not nums:
+            continue
+        suffix = " — сыграна полностью! 🏁" if stage in completed else ""
+        lines.append(f"<b>{bracket.STAGE_NAMES.get(stage, stage)}{suffix}</b>")
+        for num in nums:
+            am = actual[num]
+            pred = user_preds.get(num)
+            u_win = pred.winner_team_id if pred else None
+            total += 1
+            if u_win is not None and u_win == am.winner_id:
+                correct += 1
+                lines.append(f"✅ {_lbl(tmap, am.winner_id)} прошёл дальше — угадал!")
+            else:
+                lines.append(f"🔄 прошёл {_lbl(tmap, am.winner_id)} — ты ждал {_lbl(tmap, u_win)}")
+        lines.append("")
+
+    lines.append(f"📊 По новым матчам угадал прошедших: <b>{correct}/{total}</b>")
     return "\n".join(lines)
 
 
-def _announceable_stages(actual: dict[int, ActualMatch], undigested: set[int]) -> list[str]:
-    """Стадии, полностью сыгранные и с неразосланными матчами (в порядке сетки)."""
-    out: list[str] = []
-    for stage in bracket.STAGE_ORDER:
-        nums = STAGE_MATCHES.get(stage, [])
-        if not nums:
-            continue
-        all_decided = all(actual.get(num) and actual[num].decided for num in nums)
-        has_new = any(num in undigested for num in nums)
-        if all_decided and has_new:
-            out.append(stage)
+def _new_by_stage(actual: dict[int, ActualMatch], undigested: set[int]) -> dict[str, list[int]]:
+    """Новые сыгранные матчи плей-офф, сгруппированные по стадии (в порядке сетки)."""
+    out: dict[str, list[int]] = {}
+    for num in sorted(undigested):
+        am = actual.get(num)
+        if am and am.decided:
+            out.setdefault(am.stage, []).append(num)
     return out
 
 
-async def send_playoff_digests(bot: Bot, session: AsyncSession) -> int:
-    """Разослать сводки по новым полностью сыгранным стадиям плей-офф.
+def _completed_stages(actual: dict[int, ActualMatch], stages: list[str]) -> set[str]:
+    """Из заданных стадий — те, что теперь сыграны полностью."""
+    return {
+        st for st in stages if all(actual.get(n) and actual[n].decided for n in STAGE_MATCHES[st])
+    }
 
-    Возвращает число отправленных сообщений (0, если нечего слать).
+
+async def send_playoff_digests(bot: Bot, session: AsyncSession) -> int:
+    """Разослать сводку по новым сыгранным матчам плей-офф (инкрементально).
+
+    Возвращает число отправленных сообщений (0, если новых матчей нет).
     """
     if not settings.football_data_token:
         return 0
@@ -132,26 +126,26 @@ async def send_playoff_digests(bot: Bot, session: AsyncSession) -> int:
         await session.commit()
 
     undigested = set(await repo.get_undigested_playoff_results(session))
-    stages = _announceable_stages(actual, undigested)
-    if not stages:
+    new_by_stage = _new_by_stage(actual, undigested)
+    if not new_by_stage:
         return 0
+    completed = _completed_stages(actual, list(new_by_stage))
+    new_nums = [num for nums in new_by_stage.values() for num in nums]
 
     tmap = await repo.get_teams_map(session)
     users = await repo.get_users_with_group_predictions(session)
     sent = 0
-    for stage in stages:
-        nums = STAGE_MATCHES[stage]
-        for user in users:
-            preds = await repo.get_bracket_preds(session, user.id)
-            text = build_stage_digest(stage, nums, actual, preds, tmap)
-            try:
-                await bot.send_message(user.telegram_id, text)
-                sent += 1
-            except TelegramAPIError:
-                logger.warning("Не доставил сводку сетки user=%s", user.telegram_id)
-            await asyncio.sleep(_SEND_PAUSE)
-        await repo.mark_results_digested(session, nums)
-        logger.info("Сводка плей-офф разослана: стадия %s", stage)
+    for user in users:
+        preds = await repo.get_bracket_preds(session, user.id)
+        text = build_playoff_update(new_by_stage, actual, preds, tmap, completed)
+        try:
+            await bot.send_message(user.telegram_id, text)
+            sent += 1
+        except TelegramAPIError:
+            logger.warning("Не доставил сводку сетки user=%s", user.telegram_id)
+        await asyncio.sleep(_SEND_PAUSE)
 
+    await repo.mark_results_digested(session, new_nums)
     await session.commit()
+    logger.info("Сводка плей-офф разослана: %s матчей, %s сообщений", len(new_nums), sent)
     return sent
