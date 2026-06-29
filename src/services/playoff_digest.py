@@ -78,6 +78,34 @@ def _user_reach(user_preds: dict, stage: str) -> set[int]:
     return {p.winner_team_id} if p and p.winner_team_id is not None else set()
 
 
+# Докуда игрок довёл команду в прогнозе (от глубокой стадии к мелкой).
+_DEPTH_LABEL: list[tuple[str, str]] = [
+    ("FINAL", "ты вёл её до финала"),
+    ("SF", "ты вёл её до 1/2 финала"),
+    ("QF", "ты вёл её до 1/4 финала"),
+    ("R16", "ты вёл её до 1/8 финала"),
+    ("R32", "ты вёл её до 1/16 финала"),
+]
+
+
+def _user_depth_label(user_preds: dict, team_id: int) -> str:
+    """Докуда игрок довёл команду в своём прогнозе — для строки «что ты ставил»."""
+    champ = user_preds.get(104)
+    if champ is not None and champ.winner_team_id == team_id:
+        return "ты ставил её в чемпионы 🏆"
+    for stage, text in _DEPTH_LABEL:
+        teams = {
+            t
+            for num in STAGE_MATCHES[stage]
+            if (p := user_preds.get(num)) is not None
+            for t in (p.home_team_id, p.away_team_id)
+            if t is not None
+        }
+        if team_id in teams:
+            return text
+    return "у тебя она не выходила из группы"
+
+
 def build_playoff_update(
     new_nums: list[int],
     actual: dict[int, ActualMatch],
@@ -98,10 +126,13 @@ def build_playoff_update(
         label = _REACHED_LABEL.get(am.stage, am.stage)
         guessed = am.winner_id in _user_reach(user_preds, am.stage)
         correct += guessed
-        mark = "✅ угадал!" if guessed else "❌ у тебя дальше не проходила"
-        lines.append(f"{_lbl(tmap, am.winner_id)} → <b>{label}</b> — {mark}")
+        depth = _user_depth_label(user_preds, am.winner_id)
+        verdict = f"✅ угадал! ({depth})" if guessed else f"❌ {depth}"
+        lines.append(f"{_lbl(tmap, am.winner_id)} → <b>{label}</b>")
+        lines.append(f"   {verdict}")
+        lines.append("")
 
-    lines += ["", f"📊 Угадал проходов: <b>{correct}/{len(new_nums)}</b>"]
+    lines.append(f"📊 Угадал проходов: <b>{correct}/{len(new_nums)}</b>")
     if completed:
         done = ", ".join(
             bracket.STAGE_NAMES.get(s, s) for s in bracket.STAGE_ORDER if s in completed
