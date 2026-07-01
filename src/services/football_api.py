@@ -29,6 +29,10 @@ class FinishedMatch:
     # "HOME" / "AWAY" / None. Берётся из score.winner (учитывает серию пенальти),
     # с фолбэком на счёт. None — для ничьей группового этапа.
     winner: str | None
+    # Стадия из API: "GROUP_STAGE" / "LAST_32" / "LAST_16" / ... — нужна, чтобы
+    # матчить плей-офф по фактической стадии, а не по предсказанной паре. None, если
+    # источник её не прислал.
+    stage: str | None = None
 
 
 def _winner_side(score: dict, home_score: int, away_score: int) -> str | None:
@@ -58,7 +62,9 @@ def parse_finished(data: dict) -> list[FinishedMatch]:
         if home_score is None or away_score is None or not home or not away:
             continue
         hs, as_ = int(home_score), int(away_score)
-        out.append(FinishedMatch(home, away, hs, as_, _winner_side(score, hs, as_)))
+        out.append(
+            FinishedMatch(home, away, hs, as_, _winner_side(score, hs, as_), m.get("stage"))
+        )
     return out
 
 

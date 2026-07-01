@@ -86,12 +86,30 @@ async def _actual_group_positions(
     return first, second, third_by_group, thirds
 
 
-def _index_api_by_pair(
+# Стадия сетки бота -> стадия в API football-data.org.
+_API_STAGE: dict[str, str] = {
+    "R32": "LAST_32",
+    "R16": "LAST_16",
+    "QF": "QUARTER_FINALS",
+    "SF": "SEMI_FINALS",
+    "THIRD": "THIRD_PLACE",
+    "FINAL": "FINAL",
+}
+
+
+def _index_api_by_team_stage(
     api: list[FinishedMatch], name_to_id: dict[str, int]
-) -> dict[frozenset[int], dict]:
-    """Сыгранные матчи → {набор_id_двух_команд: {winner, score}} (по русским названиям)."""
-    out: dict[frozenset[int], dict] = {}
+) -> dict[tuple[str, int], dict]:
+    """Сыгранные матчи плей-офф → {(стадия_API, id_команды): {opp, my, opp_score, winner}}.
+
+    Ключ по КАЖДОЙ из двух команд отдельно — чтобы найти фактический матч по одному
+    достоверно известному участнику (напр. победителю группы), не полагаясь на
+    предсказанного соперника из слота «3?». Групповые матчи (GROUP_STAGE) пропускаем.
+    """
+    out: dict[tuple[str, int], dict] = {}
     for fm in api:
+        if not fm.stage or fm.stage == "GROUP_STAGE":
+            continue
         hid = name_to_id.get(ru_name(fm.home_en) or "")
         aid = name_to_id.get(ru_name(fm.away_en) or "")
         if hid is None or aid is None or hid == aid:
@@ -102,9 +120,11 @@ def _index_api_by_pair(
             win = aid
         else:
             win = None
-        out[frozenset((hid, aid))] = {
-            "winner": win,
-            "score": {hid: fm.home_score, aid: fm.away_score},
+        out[(fm.stage, hid)] = {
+            "opp": aid, "my": fm.home_score, "opp_score": fm.away_score, "winner": win
+        }
+        out[(fm.stage, aid)] = {
+            "opp": hid, "my": fm.away_score, "opp_score": fm.home_score, "winner": win
         }
     return out
 
@@ -126,7 +146,7 @@ async def resolve_actual_bracket(
 
     tmap = await repo.get_teams_map(session)
     name_to_id = {name: tid for tid, name in tmap.items()}
-    api_by_pair = _index_api_by_pair(api, name_to_id)
+    api_by_team_stage = _index_api_by_team_stage(api, name_to_id)
 
     resolved: dict[int, ActualMatch] = {}
 
@@ -149,12 +169,26 @@ async def resolve_actual_bracket(
         hid = team_for(home_src, num)
         aid = team_for(away_src, num)
         am = ActualMatch(match_number=num, stage=stage, home_id=hid, away_id=aid)
-        if hid is not None and aid is not None:
-            rec = api_by_pair.get(frozenset((hid, aid)))
-            if rec and rec["winner"] is not None:
+        # Ищем фактический сыгранный матч по ДОСТОВЕРНО известному участнику (не по
+        # слоту «3?», где соперник лишь предсказан). Реальная пара/победитель берутся
+        # из API — так фактическая сетка не расходится с прогнозной раскладкой третьих.
+        api_stage = _API_STAGE.get(stage)
+        for src, tid, is_home in ((home_src, hid, True), (away_src, aid, False)):
+            if tid is None or bracket.is_third_source(src) or api_stage is None:
+                continue
+            rec = api_by_team_stage.get((api_stage, tid))
+            if rec is None:
+                continue
+            opp = rec["opp"]
+            if is_home:
+                am.home_id, am.away_id = tid, opp
+                am.home_score, am.away_score = rec["my"], rec["opp_score"]
+            else:
+                am.away_id, am.home_id = tid, opp
+                am.away_score, am.home_score = rec["my"], rec["opp_score"]
+            if rec["winner"] is not None:
                 am.winner_id = rec["winner"]
-                am.loser_id = aid if rec["winner"] == hid else hid
-                am.home_score = rec["score"].get(hid)
-                am.away_score = rec["score"].get(aid)
+                am.loser_id = opp if rec["winner"] == tid else tid
+            break
         resolved[num] = am
     return resolved
